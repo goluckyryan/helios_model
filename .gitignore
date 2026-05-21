@@ -1,0 +1,20 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Server log
+/tmp/helios_server.log
+nohup.out
+
+# Computed files (auto-generated, not hand-edited)
+reaction.dat
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+.vscode/

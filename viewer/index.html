@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>HELIOS 3D Detector Map</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0d1117; color: #e6edf3; font-family: 'Courier New', monospace; overflow: hidden; }
+    #canvas-container { width: 100vw; height: 100vh; }
+    #tooltip {
+      position: fixed; top: 16px; left: 16px;
+      background: rgba(13,17,23,0.92); border: 1px solid #30363d;
+      border-radius: 8px; padding: 12px 16px; font-size: 13px;
+      pointer-events: none; display: none; min-width: 200px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    }
+    #tooltip .det-id { font-size: 18px; font-weight: bold; color: #ffa657; margin-bottom: 6px; }
+    #tooltip .row { display: flex; justify-content: space-between; gap: 16px; margin: 2px 0; }
+    #tooltip .label { color: #8b949e; }
+    #tooltip .val { color: #e6edf3; }
+    #ui {
+      position: fixed; top: 16px; right: 16px;
+      background: rgba(13,17,23,0.85); border: 1px solid #30363d;
+      border-radius: 8px; padding: 12px 16px; font-size: 12px; min-width: 240px;
+    }
+    #ui h3 { color: #ffa657; margin-bottom: 8px; font-size: 14px; letter-spacing: 1px; }
+    #ui .control { margin: 6px 0; display: flex; align-items: center; gap: 8px; }
+    #ui label { color: #8b949e; flex: 1; }
+    #ui select, #ui input[type=range], #ui input[type=number] {
+      background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+      border-radius: 4px; padding: 2px 6px;
+    }
+    #ui input[type=range] { width: 80px; }
+    #ui input[type=number] { width: 60px; }
+    #ui .sep { border-top: 1px solid #30363d; margin: 8px 0; }
+    #ui .info { font-size: 11px; color: #484f58; margin-top: 4px; line-height: 1.5; }
+    #ui button {
+      width: 100%; padding: 7px; margin-top: 6px;
+      background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+      border-radius: 6px; cursor: pointer; font-size: 12px; font-family: monospace;
+    }
+    #ui button:hover { background: #30363d; }
+    #ui button.active { background: #1f4a1f; border-color: #3fb950; color: #3fb950; }
+    #auto-btn.active { background: #1f4a1f; border-color: #3fb950; color: #3fb950; }
+    #ui button#clear-btn { background: #2d1515; border-color: #6e3030; color: #ff7b72; }
+    #ui button#clear-btn:hover { background: #3d1515; }
+    #event-panel { font-size: 12px; }
+    #event-panel h4 { color: #8b949e; margin-bottom: 6px; }
+    #event-panel .erow { display: flex; justify-content: space-between; gap: 12px; margin: 3px 0; }
+    #event-panel .el { color: #8b949e; }
+    #event-panel .ev { color: #e6edf3; }
+    #event-panel .ev.hit { color: #3fb950; font-weight: bold; }
+    #event-panel .ev.miss { color: #ff7b72; }
+    #legend {
+      position: fixed; bottom: 16px; left: 16px;
+      background: rgba(13,17,23,0.85); border: 1px solid #30363d;
+      border-radius: 8px; padding: 10px 14px; font-size: 12px; min-width: 200px;
+    }
+    #legend h4 { color: #8b949e; margin-bottom: 8px; }
+    #legend .li { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+    #legend .sw { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+    #status { position: fixed; bottom: 16px; right: 16px; font-size: 11px; color: #484f58; }
+  </style>
+</head>
+<body>
+<div id="canvas-container"></div>
+<div id="tooltip">
+  <div class="det-id" id="tt-id">Det 00</div>
+  <div class="row"><span class="label">Row (side)</span><span class="val" id="tt-row">—</span></div>
+  <div class="row"><span class="label">Col (z-pos)</span><span class="val" id="tt-col">—</span></div>
+  <div class="row"><span class="label">φ</span><span class="val" id="tt-phi">—</span></div>
+  <div class="row"><span class="label">Z center</span><span class="val" id="tt-z">—</span></div>
+</div>
+<div style="position:fixed;top:16px;right:16px;">
+  <div id="ui">
+    <h3>☀ HELIOS</h3>
+    <div class="control"><label>Bore opacity</label><input type="range" id="bore-opacity" min="0" max="40" value="20"></div>
+    <div class="control"><label>Rotate speed</label><input type="range" id="rotate-speed" min="0" max="100" value="0"></div>
+    <div class="control"><label>B-field (T)</label><input type="range" id="bfield" min="-5" max="5" value="-3" step="0.1" style="width:70px;"><span id="bfield-val" style="color:#ffa657;min-width:40px;">-3.0 T</span></div>
+    <div class="control"><label>Color mode</label>
+      <select id="color-mode">
+        <option value="row">By Row (side)</option>
+        <option value="col">By Column (z-pos)</option>
+        <option value="id">By Det ID</option>
+      </select>
+    </div>
+    <div class="sep"></div>
+    <div class="control"><label>Support tube</label><input type="range" id="support-opacity" min="0" max="100" value="100"></div>
+    <div class="control"><label>Show bore</label><input type="checkbox" id="show-bore" checked></div>
+    <div class="control"><label>Show recoil det</label><input type="checkbox" id="show-recoil" checked></div>
+    <div class="control"><label>Show axes</label><input type="checkbox" id="show-axes" checked></div>
+    <div class="sep"></div>
+    <div class="control"><label>Magnet Z offset</label><span id="target-z-val" style="color:#ffa657;min-width:48px;text-align:right;">0 mm</span></div>
+    <div class="control" style="flex-direction:column;align-items:stretch;gap:4px;">
+      <input type="range" id="target-z" min="-400" max="400" value="0" step="5" style="width:100%;">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#484f58;"><span>-400mm</span><span>0</span><span>+400mm</span></div>
+      <div style="font-size:10px;color:#484f58;margin-top:2px;">← upstream &nbsp;&nbsp;&nbsp; downstream →</div>
+    </div>
+    <div class="sep"></div>
+    <button id="reset-view-btn" style="width:100%;padding:5px;background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">⟳ Reset View</button>
+    <div class="sep"></div>
+    <div class="info" id="geo-info">Loading...</div>
+  </div>
+</div>
+<div style="position:fixed;bottom:16px;right:16px;">
+  <div style="background:rgba(13,17,23,0.88);border:1px solid #30363d;border-radius:8px;padding:12px 16px;font-size:12px;display:flex;gap:20px;align-items:flex-start;">
+
+    <!-- Geometry column -->
+    <div style="min-width:140px;">
+      <div style="color:#ffa657;font-weight:bold;margin-bottom:8px;font-size:13px;">⚙ Geometry</div>
+      <div class="control"><label>Array pos (mm)</label><input type="number" id="array-pos" value="-121" min="-600" max="600" step="1" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
+      <div class="control"><label>RDT pos (mm)</label><input type="number" id="rdt-pos" value="1000" min="100" max="3000" step="10" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
+      <button id="load-config-btn" style="width:100%;margin-top:6px;padding:4px;background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">↓ Load digios</button>
+      <button id="apply-geo-btn" style="width:100%;margin-top:4px;padding:4px;background:#21262d;border:1px solid #3fb950;color:#3fb950;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">▶ Apply</button>
+      <div id="config-status" style="font-size:10px;color:#484f58;margin-top:4px;max-width:140px;word-break:break-word;">—</div>
+    </div>
+
+    <!-- Reaction column -->
+    <div style="min-width:150px;">
+      <div style="color:#79c0ff;font-weight:bold;margin-bottom:8px;font-size:13px;">⚛ Reaction</div>
+      <div style="display:grid;grid-template-columns:auto 52px 52px;gap:3px 6px;align-items:center;">
+        <span style="color:#8b949e;">Beam</span>
+        <input type="number" id="rx-beam-A" value="32" min="1" max="300" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;" title="A">
+        
+        <input type="number" id="rx-beam-Z" value="14" min="0" max="120" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;" title="Z">
+        <span style="color:#8b949e;">Target</span>
+        <input type="number" id="rx-tgt-A" value="2" min="1" max="300" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
+        
+        <input type="number" id="rx-tgt-Z" value="1" min="0" max="120" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
+        <span style="color:#8b949e;">Recoil b</span>
+        <input type="number" id="rx-rec-A" value="1" min="1" max="300" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
+        
+        <input type="number" id="rx-rec-Z" value="1" min="0" max="120" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
+        <span style="color:#8b949e;">E MeV/u</span>
+        <input type="number" id="rx-energy" value="8.8" min="0.1" max="100" step="0.1" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
+
+      </div>
+      <button id="rx-build-btn" style="width:100%;margin-top:6px;padding:4px;background:#21262d;border:1px solid #79c0ff;color:#79c0ff;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">⚙ Compute</button>
+      <div id="rx-status" style="font-size:10px;color:#484f58;margin-top:4px;max-width:150px;word-break:break-word;">—</div>
+    </div>
+
+    <!-- Kinematics column -->
+    <div id="event-panel" style="min-width:160px;">
+      <div style="color:#ffa657;font-weight:bold;margin-bottom:8px;font-size:13px;">⚡ Kinematics</div>
+      <div class="control"><label>θ_CM (deg)</label><input type="number" id="theta-cm" value="45" min="0" max="180" step="1"></div>
+      <div class="control"><label>φ_CM (deg)</label><input type="number" id="phi-cm" value="30" min="0" max="360" step="1"></div>
+      <div class="control"><label>Ex (MeV)</label><input type="number" id="ex-mev" value="0" min="0" max="10" step="0.1"></div>
+      <div class="control"><label>Anim speed</label><input type="range" id="anim-speed" min="1" max="20" value="8"></div>
+      <div class="control"><label>Random θ,φ</label><input type="checkbox" id="random-angles" checked></div>
+      <div class="control"><label>Stop on support</label><input type="checkbox" id="stop-on-support" checked></div>
+      <div class="control"><label>Rate /sec</label><input type="range" id="gen-rate" min="1" max="10" value="3" step="1"><span id="gen-rate-val" style="color:#ffa657;">3/s</span></div>
+      <div class="control"><label>Keep N</label><input type="range" id="keep-n" min="1" max="20" value="5" step="1"><span id="keep-n-val" style="color:#ffa657;">5</span></div>
+      <button id="gen-btn">▶ Generate</button>
+      <button id="auto-btn">▶▶ Auto</button>
+      <button id="clear-btn">✕ Clear</button>
+      <div class="sep" style="margin-top:6px;"></div>
+      <div id="event-info" style="font-size:10px;color:#484f58;">Press Generate.</div>
+    </div>
+
+  </div>
+</div>
+<div id="legend">
+  <h4 id="legend-title">Color: By Row</h4>
+  <div id="legend-items"></div>
+  <div class="sep"></div>
+  <div class="li"><div class="sw" style="background:#44aaff;"></div><span>Light recoil (b)</span></div>
+  <div class="li"><div class="sw" style="background:#ff8844;"></div><span>Heavy recoil (B)</span></div>
+</div>
+<div id="status">—</div>
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// PHYSICS: Helical orbit in solenoidal B-field
+// Mirrors HELIOS_LIB.h CalExThetaCM / trajectory equations
+// Units: mm, MeV, T, ns, c=299.792458 mm/ns
+// ═══════════════════════════════════════════════════════════════════
+const C = 299.792458; // mm/ns
+
+// reaction.dat values (33Si(d,p)34Si, Elab=20 MeV/u * 33 = 660 MeV)
+const REACTION = {
+  mass_b: 938.2720,   // MeV/c^2  light recoil (proton)
+  charge_b: 1,
+  betaCM: 0.14608743,
+  Ecm: 29810.5622,    // MeV
+  mass_B: 28846.2128, // MeV/c^2  heavy recoil
+  charge_B: 14,       // 33Si -> 34Si, Z=14
+  alpha: 0.1360,      // slope/betaRect (MeV/mm)
+};
+
+function gammaCM(beta) { return 1.0 / Math.sqrt(1 - beta * beta); }
+
+function computeTrack(mass, charge, thetaCM_deg, phiCM_deg, Ex_MeV, Bfield_T, isLight) {
+  // CM kinematics: 2-body decay
+  const tCM = thetaCM_deg * Math.PI / 180;
+  const pCM_deg = phiCM_deg * Math.PI / 180;
+  const beta = REACTION.betaCM;
+  const gam = gammaCM(beta);
+  const Ex = Ex_MeV;
+
+  // CM momentum of light recoil b
+  // Q = mass_A + mass_a - mass_b - mass_B - Ex  (but we use Ecm directly)
+  // For simplicity use non-relativistic 2-body in CM:
+  // Ecm_available = Ecm - Ex - mass_b - mass_B (rest masses already in Ecm definition)
+  // Actually reaction.dat Ecm = total CM energy, so:
+  const m1 = REACTION.mass_b;   // light
+  const m2 = REACTION.mass_B + Ex; // heavy (Ex raises mass_B)
+  const Ecm = REACTION.Ecm;
+
+  // CM momenta (relativistic 2-body)
+  const term = (Ecm*Ecm - (m1+m2)*(m1+m2)) * (Ecm*Ecm - (m1-m2)*(m1-m2));
+  if (term < 0) return null; // below threshold
+  const pCM = Math.sqrt(term) / (2 * Ecm);
+
+  // Energy of each particle in CM
+  const E1CM = Math.sqrt(pCM*pCM + m1*m1);
+  const E2CM = Math.sqrt(pCM*pCM + m2*m2);
+
+  // Select particle
+  const mPart = isLight ? m1 : m2;
+  const ECM  = isLight ? E1CM : E2CM;
+  const pCMpart = pCM; // magnitude same for both in 2-body
+
+  // HELIOS inverse kinematics convention:
+  // θ_CM is angle of light recoil in CM frame measured from beam direction
+  // θ_CM~0 → light recoil forward in CM → boosted back in lab (upstream)
+  // θ_CM~180 → light recoil backward in CM → goes downstream in lab
+  // So light recoil: use π - tCM (flip), heavy: use tCM
+  const tCMp = isLight ? Math.PI - tCM : tCM;
+  const pz_cm = pCMpart * Math.cos(tCMp);
+  const pt_cm = pCMpart * Math.sin(tCMp);
+  const px_cm = pt_cm * Math.cos(pCM_deg);
+  const py_cm = pt_cm * Math.sin(pCM_deg);
+
+  // Boost to lab (boost along Z)
+  const pz_lab = gam * (pz_cm + beta * ECM);
+  const E_lab  = gam * (ECM + beta * pz_cm);
+  const px_lab = px_cm;
+  const py_lab = py_cm;
+
+  // Lab total momentum and transverse
+  const p_lab = Math.sqrt(px_lab*px_lab + py_lab*py_lab + pz_lab*pz_lab);
+  const pt_lab = Math.sqrt(px_lab*px_lab + py_lab*py_lab);
+
+  // Velocity components
+  const v = C * p_lab / E_lab; // mm/ns (speed)
+  const vz = C * pz_lab / E_lab;
+  const vt = C * pt_lab / E_lab;
+
+  // Cyclotron radius: rho = p_T / (q * B) in consistent units
+  // p_T in MeV/c, B in T, q in elementary charges
+  // rho [mm] = p_T[MeV/c] / (0.2998 * q[e] * B[T]) * 1000
+  // = p_T / (q * |B| * 0.2998)  [MeV/c / (e·T)] → mm
+  const B_abs = Math.abs(Bfield_T);
+  if (B_abs < 0.01) return null; // no field — no helical orbit
+  if (pt_lab < 0.001) return null; // on-axis — degenerate
+  const rho = pt_lab / (charge * B_abs * 0.2998); // mm
+
+  // B-field sign determines rotation direction
+  const Bsign = Bfield_T < 0 ? -1 : 1;
+
+  // Initial phi angle of transverse momentum in lab
+  const phi0 = Math.atan2(py_lab, px_lab);
+
+  // Helix parametric: parameter t = arc length / rho (radians of cyclotron rotation)
+  // x(t) = rho*(sin(vz/vt * rho_angle - Bsign*phi0) + Bsign*sin(phi0))
+  // Following HELIOS_LIB.h:
+  // XPos(z,theta,phi,rho,sign) = rho*(sin(tan(theta)*z/rho - sign*phi) + sign*sin(phi))
+  // where theta = lab polar angle, phi = lab azimuthal angle of p_T, sign = Bsign
+  // tan(theta_lab) = pt_lab / pz_lab
+  const tanTheta = pt_lab / Math.abs(pz_lab);
+  const vz_sign = pz_lab >= 0 ? 1 : -1;
+
+  // Cyclotron angular frequency ω = vt / rho (rad/ns)
+  const omega = vt / rho;
+  // vz is already signed (C * pz_lab / E_lab), keep as-is
+  const vz_signed = vz; // signed: negative = going upstream
+
+  // Helix by time: t in ns
+  // x(t) = rho*(sin(omega*t + phi0) - sin(phi0)) * Bsign  ... derived from circular motion
+  // More precisely, matching HELIOS_LIB convention (starts at origin, phi0 = initial azimuth of p_T):
+  function helixPointT(t) {
+    const angle = omega * t;
+    const x = rho * (Math.sin(angle - Bsign * phi0) + Bsign * Math.sin(phi0));
+    const y = rho * (Bsign * Math.cos(angle - Bsign * phi0) - Bsign * Math.cos(phi0));
+    const z = vz_signed * t;
+    return { x, y, z };
+  }
+
+  // Also keep z-based for compatibility
+  function helixPoint(z) {
+    const arg = tanTheta * z / rho - Bsign * phi0;
+    const x = rho * (Math.sin(arg) + Bsign * Math.sin(phi0));
+    const y = rho * (Bsign * Math.cos(arg) - Bsign * Math.cos(phi0));
+    return { x, y, z };
+  }
+
+  return {
+    mPart, charge, rho, phi0, tanTheta, Bsign, vz_sign: pz_lab >= 0 ? 1 : -1,
+    pz_lab, pt_lab, vz: vz_signed, vt, E_lab, p_lab, omega,
+    helixPoint, helixPointT,
+    thetaLab_deg: Math.atan2(pt_lab, pz_lab) * 180 / Math.PI,
+    E_kin: E_lab - mPart,
+  };
+}
+
+// Sample helix uniformly in TIME — equal arc-length steps
+// zLimit: the z boundary to stop at (negative=upstream, positive=downstream)
+function sampleHelixPoints(track, zLimit, nSteps) {
+  const vz = track.vz;   // signed mm/ns
+  const omega = track.omega;
+  if (Math.abs(vz) < 0.001 || !isFinite(omega) || omega === 0) return [];
+  // Travel time to reach zLimit from z=0
+  const tTotal = zLimit / vz; // positive when vz and zLimit have same sign
+  if (!isFinite(tTotal) || tTotal <= 0) return [];
+  const dt = tTotal / nSteps;
+  const pts = [];
+  for (let i = 0; i <= nSteps; i++) {
+    pts.push(track.helixPointT(i * dt));
+  }
+  return pts;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SCENE SETUP
+// ═══════════════════════════════════════════════════════════════════
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1117);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 10000);
+camera.position.set(80, 60, 300);
+camera.lookAt(0, 0, -200);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+container.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0); // target position
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 20;
+controls.maxDistance = 5000;
+controls.update();
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dir1 = new THREE.DirectionalLight(0xffffff, 0.8);
+dir1.position.set(200, 300, 200); scene.add(dir1);
+const dir2 = new THREE.DirectionalLight(0x88aaff, 0.3);
+dir2.position.set(-200,-100,-200); scene.add(dir2);
+
+// ═══════════════════════════════════════════════════════════════════
+// GEOMETRY STATE
+// ═══════════════════════════════════════════════════════════════════
+let GEO = null;
+let detMeshes = [];
+let boreGroup = null, recoilGroup = null, axisGroup = null, zAxisGroup = null;
+let movableGroup = null; // magnet bore slides along Z
+let beamArrowGroup = null;
+let targetGroup = null;
+let tubeMeshes = []; // support tube panels for opacity control
+
+const ROW_COLORS = [0x58a6ff,0xff7b72,0x79c0ff,0xffa657]; // 4 sides
+const COL_COLORS = [0xff4444,0xff8c00,0xffd700,0x44ff88,0x44aaff,0xcc44ff]; // 6 z-positions
+
+function getDetColor(det) {
+  const mode = document.getElementById('color-mode').value;
+  if (mode === 'row') return new THREE.Color(ROW_COLORS[det.row % 4]);
+  if (mode === 'col') return new THREE.Color(COL_COLORS[det.col % 6]);
+  const hue = det.id / (GEO.nDet * GEO.mDet);
+  return new THREE.Color().setHSL(hue, 0.8, 0.55);
+}
+
+function updateColors() {
+  detMeshes.forEach((m, i) => { m.material.color = getDetColor(GEO.detectors[i]); });
+  updateLegend();
+}
+
+function buildTarget() {
+  if (targetGroup) scene.remove(targetGroup);
+  targetGroup = new THREE.Group();
+  const label = getLabelFromRxField('rx-tgt-A', 'rx-tgt-Z', '2H');
+  const color = 0xffdd44; // gold
+  const radius = 20;      // mm, visible disk radius
+  const thickness = 1.0;  // mm
+
+  // Disk (foil)
+  const disk = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, thickness, 64),
+    new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.75, side: THREE.DoubleSide })
+  );
+  disk.rotation.x = Math.PI / 2; // orient in XY plane
+  targetGroup.add(disk);
+
+  // Thin ring outline
+  const ring = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.CylinderGeometry(radius, radius, thickness, 64, 1, true)),
+    new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
+  );
+  ring.rotation.x = Math.PI / 2;
+  targetGroup.add(ring);
+
+  // Label sprite above disk
+  const canvas = makeNuclideLabel(label, '#' + new THREE.Color(color).getHexString());
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false, alphaTest: 0.01 }));
+  sprite.position.set(0, radius + 28, 0);
+  sprite.scale.set(100, 38, 1);
+  targetGroup.add(sprite);
+
+  scene.add(targetGroup);
+}
+
+// Element symbols for auto label generation
+const ELEMENT_SYMBOLS = [
+  'n','H','He','Li','Be','B','C','N','O','F','Ne',
+  'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
+  'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',
+  'Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr',
+  'Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn',
+  'Sb','Te','I','Xe','Cs','Ba','La','Ce','Pr','Nd',
+];
+function azToLabel(A, Z) {
+  const sym = ELEMENT_SYMBOLS[Z] || `Z${Z}`;
+  return `${A}${sym}`;
+}
+function getLabelFromRxField(aFieldId, zFieldId, fallback) {
+  const aEl = document.getElementById(aFieldId);
+  const zEl = document.getElementById(zFieldId);
+  if (!aEl || !zEl) return fallback;
+  const A = parseInt(aEl.value), Z = parseInt(zEl.value);
+  if (isNaN(A) || isNaN(Z)) return fallback;
+  return azToLabel(A, Z);
+}
+
+function makeNuclideLabel(rawLabel, colorHex) {
+  // Parse "32Si" -> A="32", sym="Si"; render as superscript A + symbol
+  const match = rawLabel.match(/^(\d+)([A-Za-z]+)$/);
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height); // transparent background
+  ctx.fillStyle = colorHex;
+  if (match) {
+    const A = match[1], sym = match[2];
+    // Symbol in large font
+    ctx.font = 'Bold 60px Courier New';
+    ctx.textAlign = 'left';
+    const symW = ctx.measureText(sym).width;
+    const totalW = 36 + symW; // 36px for superscript A
+    const xOff = (256 - totalW) / 2;
+    // Superscript A (smaller, raised)
+    ctx.font = 'Bold 36px Courier New';
+    ctx.fillText(A, xOff, 44);
+    // Symbol
+    ctx.font = 'Bold 60px Courier New';
+    ctx.fillText(sym, xOff + 36, 80);
+  } else {
+    ctx.font = 'Bold 56px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText(rawLabel, 128, 72);
+  }
+  return canvas;
+}
+
+function buildBeamArrow() {
+  if (beamArrowGroup) scene.remove(beamArrowGroup);
+  beamArrowGroup = new THREE.Group();
+  const label = getLabelFromRxField('rx-beam-A', 'rx-beam-Z', '32Si');
+  const color  = 0x00eeff;
+  const colorHex = '#' + new THREE.Color(color).getHexString();
+  // Start at upstream end of magnet (moves with magnet slider)
+  const magnetOffset = movableGroup ? movableGroup.position.z : 0;
+  const zStart = magnetOffset - 750;
+  const zEnd   = 0;
+
+  // Thick shaft using a thin cylinder along Z
+  const coneLen2 = 24;
+  const shaftLen = Math.abs(zEnd - zStart) - coneLen2;
+  const shaft = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.5, 1.5, shaftLen, 12),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 })
+  );
+  shaft.rotation.x = Math.PI / 2;
+  shaft.position.z = zStart + shaftLen / 2;
+  beamArrowGroup.add(shaft);
+
+  // Arrowhead cone at target end (z=0)
+  const cone = new THREE.Mesh(
+    new THREE.ConeGeometry(6, 24, 16),
+    new THREE.MeshBasicMaterial({ color })
+  );
+  const coneLen = 24;
+  cone.position.set(0, 0, zEnd - coneLen / 2); // tip at z=0, base upstream
+  cone.setRotationFromQuaternion(
+    new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), new THREE.Vector3(0,0,1))
+  );
+  beamArrowGroup.add(cone);
+
+  // Label at TAIL (upstream end)
+  const canvas = makeNuclideLabel(label, colorHex);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false, alphaTest: 0.01 }));
+  sprite.position.set(0, 30, zStart); // above tail
+  sprite.scale.set(100, 38, 1);
+  beamArrowGroup.add(sprite);
+
+  scene.add(beamArrowGroup);
+}
+
+function buildScene() {
+  const g = GEO;
+  detMeshes = [];
+
+  // Fixed group: silicon array + recoil + target stay put
+  movableGroup = new THREE.Group(); // bore/magnet slides
+  scene.add(movableGroup);
+
+  const detThickness = 2.5; // mm, rendered radial thickness
+  const tubeHalfVis = 10.5; // mm, must match tube construction below
+  const detRadialCenter = tubeHalfVis + detThickness / 2; // inner face flush on tube
+
+  g.detectors.forEach(det => {
+    const geo = new THREE.BoxGeometry(det.width * 0.9, detThickness, det.length * 0.9);
+    const mat = new THREE.MeshPhongMaterial({ color: getDetColor(det), transparent: false, opacity: 1.0, shininess: 60, depthWrite: true });
+    const mesh = new THREE.Mesh(geo, mat);
+    // Radial direction unit vector for this detector
+    const phi = det.phi_deg * Math.PI / 180;
+    const rx = Math.cos(phi), ry = Math.sin(phi);
+    mesh.position.set(rx * detRadialCenter, ry * detRadialCenter, det.z);
+    const baseRotY = -Math.atan2(det.y, det.x);
+    // row = side: 0=+X, 1=+Y, 2=-X, 3=-Y
+    const extraY = (det.row === 1 || det.row === 3) ? Math.PI / 2 : 0;
+    const extraZ = (det.row === 0 || det.row === 2) ? Math.PI / 2 : 0;
+    mesh.rotation.set(0, baseRotY + extraY, extraZ, 'YZX');
+    mesh.renderOrder = 0;
+    mesh.userData = { det };
+    scene.add(mesh);
+    detMeshes.push(mesh);
+  });
+
+  // Bore — 1500 mm long, inside movableGroup (magnet slides along Z)
+  boreGroup = new THREE.Group();
+  const boreLen = 1500;
+  const boreMat = new THREE.MeshPhongMaterial({ color: 0x4488aa, transparent: true, opacity: 0.20, side: THREE.BackSide, depthWrite: false });
+  const boreMesh = new THREE.Mesh(new THREE.CylinderGeometry(g.bore, g.bore, boreLen, 64, 1, true), boreMat);
+  boreMesh.rotation.x = Math.PI/2;
+  boreMesh.position.z = 0; // local center; movableGroup.position.z shifts it
+  boreGroup.add(boreMesh);
+  // End-cap rings
+  [-boreLen/2, boreLen/2].forEach(zpos => {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(g.bore - 10, g.bore + 10, 64),
+      new THREE.MeshBasicMaterial({ color: 0x4488aa, transparent: true, opacity: 0.12, side: THREE.DoubleSide })
+    );
+    ring.position.z = zpos;
+    boreGroup.add(ring);
+  });
+  movableGroup.add(boreGroup);
+
+  // Recoil detector (fixed)
+  recoilGroup = new THREE.Group();
+  if (g.recoilPos !== 0) {
+    const rMesh = new THREE.Mesh(
+      new THREE.RingGeometry(g.recoilInner, g.recoilOuter, 64),
+      new THREE.MeshPhongMaterial({ color: 0xff6688, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
+    );
+    rMesh.position.z = g.recoilPos;
+    recoilGroup.add(rMesh);
+  }
+  scene.add(recoilGroup);
+
+  // Array support tube — square hollow tube, 4 thin panels + wireframe
+  const tubeHalf = 10.5;              // 21 mm outer side → 10.5 mm half-side
+  const tubeWall = 1.5;               // mm wall thickness
+  const tubeLen  = g.zMax - g.zMin;  // 340 mm
+  const tubeCenterZ = (g.zMin + g.zMax) / 2; // -291 mm
+  tubeMeshes = [];
+  const tubeGroup = new THREE.Group();
+  [
+    { tx:  tubeHalf, ty: 0,          w: tubeWall,   h: tubeHalf*2 },
+    { tx: -tubeHalf, ty: 0,          w: tubeWall,   h: tubeHalf*2 },
+    { tx: 0,         ty:  tubeHalf,  w: tubeHalf*2, h: tubeWall   },
+    { tx: 0,         ty: -tubeHalf,  w: tubeHalf*2, h: tubeWall   },
+  ].forEach(f => {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(f.w, f.h, tubeLen),
+      new THREE.MeshPhongMaterial({ color: 0x888888, transparent: false, opacity: 1.0, depthWrite: true })
+    );
+    mesh.position.set(f.tx, f.ty, tubeCenterZ);
+    tubeGroup.add(mesh);
+    tubeMeshes.push(mesh);
+  });
+  const tubeWire = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(tubeHalf*2, tubeHalf*2, tubeLen)),
+    new THREE.LineBasicMaterial({ color: 0xbbbbbb, transparent: true, opacity: 0.5 })
+  );
+  tubeWire.position.z = tubeCenterZ;
+  tubeGroup.add(tubeWire);
+  scene.add(tubeGroup);
+
+  // Store tube params on GEO for hit detection
+  GEO._tubeHalf = tubeHalf;
+  GEO._tubeZMin = g.zMin;
+  GEO._tubeZMax = g.zMax;
+
+  // Axes
+  axisGroup = new THREE.Group();
+  const addLine = (pts, color) => axisGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.6 })));
+
+  function addArrow(dir, origin, length, color, label) {
+    // Shaft line from origin to tip
+    const tip = new THREE.Vector3().addVectors(origin, dir.clone().multiplyScalar(length));
+    addLine([origin.clone(), tip.clone()], color);
+    // Cone at tip
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(7, 28, 12),
+      new THREE.MeshBasicMaterial({ color })
+    );
+    cone.position.copy(tip);
+    // Align cone to direction
+    const up = new THREE.Vector3(0, 1, 0);
+    const q = new THREE.Quaternion().setFromUnitVectors(up, dir.clone().normalize());
+    cone.setRotationFromQuaternion(q);
+    axisGroup.add(cone);
+    // Text label sprite
+    const canvas = document.createElement('canvas');
+    canvas.width = 128; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 128, 64);
+    ctx.fillStyle = '#' + new THREE.Color(color).getHexString();
+    ctx.font = 'Bold 52px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, 64, 52);
+    const tex = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, alphaTest: 0.01 }));
+    const labelPos = tip.clone().add(dir.clone().multiplyScalar(25));
+    sprite.position.copy(labelPos);
+    sprite.scale.set(50, 25, 1);
+    axisGroup.add(sprite);
+  }
+
+  // X axis — red (fixed, at target)
+  addLine([new THREE.Vector3(-180,0,0), new THREE.Vector3(180,0,0)], 0xff5555);
+  addArrow(new THREE.Vector3(1,0,0), new THREE.Vector3(180,0,0), 40, 0xff5555, 'X');
+  // Y axis — green (fixed, at target)
+  addLine([new THREE.Vector3(0,-180,0), new THREE.Vector3(0,180,0)], 0x55ff55);
+  addArrow(new THREE.Vector3(0,1,0), new THREE.Vector3(0,180,0), 40, 0x55ff55, 'Y');
+  scene.add(axisGroup);
+
+  // Z axis lives in movableGroup (slides with magnet)
+  // spans -750 to +750 mm (magnet half-length) in local coords
+  zAxisGroup = new THREE.Group();
+  const addZLine = (pts, color) => zAxisGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.6 })));
+  function addZArrow(dir, origin, length, color, label) {
+    const tip = new THREE.Vector3().addVectors(origin, dir.clone().multiplyScalar(length));
+    addZLine([origin.clone(), tip.clone()], color);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(7, 28, 12), new THREE.MeshBasicMaterial({ color }));
+    cone.position.copy(tip);
+    cone.setRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize()));
+    zAxisGroup.add(cone);
+    const canvas = document.createElement('canvas'); canvas.width=128; canvas.height=64;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 128, 64);
+    ctx.fillStyle = '#'+new THREE.Color(color).getHexString();
+    ctx.font='Bold 52px Courier New'; ctx.textAlign='center'; ctx.fillText(label,64,52);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false, alphaTest: 0.01 }));
+    sprite.position.copy(tip.clone().add(dir.clone().multiplyScalar(25)));
+    sprite.scale.set(50,25,1);
+    zAxisGroup.add(sprite);
+  }
+  addZLine([new THREE.Vector3(0,0,-750), new THREE.Vector3(0,0,750)], 0xffff55);
+  addZArrow(new THREE.Vector3(0,0,1), new THREE.Vector3(0,0,750), 40, 0xffff55, 'Z');
+  movableGroup.add(zAxisGroup);
+
+  // Target — thin disk (foil) in XY plane at z=0, labeled
+  buildTarget();
+
+  // Beam arrow (fixed lab frame) — built separately so it can be rebuilt on label change
+  buildBeamArrow();
+
+  updateLegend();
+  document.getElementById('geo-info').innerHTML =
+    `B=${g.Bfield}T | bore=${g.bore}mm<br>${g.nDet}×${g.mDet} dets @ r=${g.perpDist}mm<br>` +
+    `det ${g.length}×${g.width}mm | ${g.facing}-facing<br>Z: ${g.zMin.toFixed(0)}→${g.zMax.toFixed(0)}mm`;
+}
+
+function updateLegend() {
+  if (!GEO) return;
+  const mode = document.getElementById('color-mode').value;
+  const items = document.getElementById('legend-items');
+  const sideNames = {0:'+X', 1:'+Y', 2:'-X', 3:'-Y'};
+  document.getElementById('legend-title').textContent = mode === 'row' ? 'Color: By Row (side)' : mode === 'col' ? 'Color: By Col (z-pos)' : 'Color: By Det ID';
+  items.innerHTML = '';
+  if (mode === 'row') {
+    for (let i = 0; i < 4; i++) {
+      const c = '#'+new THREE.Color(ROW_COLORS[i]).getHexString();
+      items.innerHTML += `<div class="li"><div class="sw" style="background:${c}"></div><span>Row ${i}: ${sideNames[i]}</span></div>`;
+    }
+  } else if (mode === 'col') {
+    for (let j = 0; j < 6; j++) {
+      const d = GEO.detectors.find(x => x.col === j);
+      const c = '#'+new THREE.Color(COL_COLORS[j]).getHexString();
+      const zStr = d ? d.z_center.toFixed(0) : '?';
+      items.innerHTML += `<div class="li"><div class="sw" style="background:${c}"></div><span>Col ${j}: z=${zStr}mm</span></div>`;
+    }
+  }
+}
+// ═══════════════════════════════════════════════════════════════════
+// TRAJECTORY ANIMATION
+// ═══════════════════════════════════════════════════════════════════
+let trackGroup = new THREE.Group();
+scene.add(trackGroup);
+
+let animations = []; // active animation states (each event = 2 anims: light + heavy)
+let eventHistory = []; // list of {lightAnim, heavyAnim} per event, for fade management
+let autoGenInterval = null;
+let isAutoGen = false;
+
+function clearTracks() {
+  animations = [];
+  eventHistory = [];
+  while (trackGroup.children.length) trackGroup.remove(trackGroup.children[0]);
+  document.getElementById('event-info').textContent = 'Tracks cleared.';
+  document.getElementById('event-info').style.color = '#484f58';
+}
+
+function pruneOldTracks() {
+  const keepN = parseInt(document.getElementById('keep-n').value);
+  // Remove oldest events beyond keepN
+  while (eventHistory.length > keepN) {
+    const old = eventHistory.shift();
+    [old.lightAnim, old.heavyAnim].forEach(anim => {
+      if (anim) {
+        trackGroup.remove(anim.line);
+        trackGroup.remove(anim.dotMesh);
+        trackGroup.remove(anim.flashMesh);
+        animations = animations.filter(a => a !== anim);
+      }
+    });
+  }
+  // Fade older tracks: oldest = most transparent
+  eventHistory.forEach((ev, idx) => {
+    const fade = (idx + 1) / eventHistory.length; // 0=oldest, 1=newest
+    [ev.lightAnim, ev.heavyAnim].forEach(anim => {
+      if (anim && anim.line) {
+        anim.line.material.opacity = fade * 0.85;
+        anim.dotMesh.material.opacity = fade;
+      }
+    });
+  });
+}
+
+// Check if a helix point hits the square support tube
+function checkTubeHit(pt, geo) {
+  if (!geo._tubeHalf) return false;
+  if (pt.z < geo._tubeZMin || pt.z > geo._tubeZMax) return false;
+  const ax = Math.abs(pt.x), ay = Math.abs(pt.y);
+  const h = geo._tubeHalf;   // outer half-side = 10.5 mm
+  const w = 1.5;              // wall thickness mm
+  // Hit from outside: point just crossed the outer face
+  if (ax <= h && ay <= h) {
+    // Inside the square: hit inner face
+    return (ax > h - w || ay > h - w);
+  }
+  // Outside the square: hit outer face if within one wall thickness outside
+  if (ax <= h + w && ay <= h) return true; // crossed +X or -X face from outside
+  if (ay <= h + w && ax <= h) return true; // crossed +Y or -Y face from outside
+  return false;
+}
+
+// Check if a helix point hits a silicon detector
+function checkSiHit(pt, geo) {
+  const r = Math.sqrt(pt.x*pt.x + pt.y*pt.y);
+  if (Math.abs(r - geo.perpDist) > geo.width * 0.6) return null;
+  for (const det of geo.detectors) {
+    const zNear = det.z_near;
+    const zFar  = (geo.firstPos < 0) ? zNear - geo.length : zNear + geo.length;
+    const zMin  = Math.min(zNear, zFar);
+    const zMax  = Math.max(zNear, zFar);
+    if (pt.z < zMin || pt.z > zMax) continue;
+    // Check phi alignment: detector at phi_deg ± (half angular width)
+    const ptPhi = Math.atan2(pt.y, pt.x) * 180 / Math.PI;
+    const detPhi = det.phi_deg;
+    let dPhi = Math.abs(ptPhi - detPhi) % 360;
+    if (dPhi > 180) dPhi = 360 - dPhi;
+    // half-width in degrees at radius perpDist
+    const halfWidthDeg = (geo.width / 2) / geo.perpDist * 180 / Math.PI;
+    if (dPhi < halfWidthDeg + 5) return det; // +5 deg tolerance
+  }
+  return null;
+}
+
+// Check if a point hits the recoil detector
+function checkRecoilHit(pt, geo) {
+  if (Math.abs(pt.z - geo.recoilPos) > 5) return false;
+  const r = Math.sqrt(pt.x*pt.x + pt.y*pt.y);
+  return r >= geo.recoilInner && r <= geo.recoilOuter;
+}
+
+function generateEvent(autoMode = false) {
+  if (!GEO) return;
+  // Both manual and auto accumulate up to keepN tracks; Clear button resets
+
+  const useRandom = document.getElementById('random-angles').checked;
+  const thetaCM = useRandom ? Math.random() * 170 + 5 : parseFloat(document.getElementById('theta-cm').value);
+  const phiCM   = useRandom ? Math.random() * 360     : parseFloat(document.getElementById('phi-cm').value);
+  const Ex      = parseFloat(document.getElementById('ex-mev').value);
+
+  const Bfield = GEO.Bfield;
+  // Time-based N: fixed time step = T_cyc/100 (100 points per orbit)
+  // Cap at 10000 to avoid browser freeze
+  function adaptiveN(track, zLimit) {
+    const tTotal = zLimit / track.vz;
+    if (!isFinite(tTotal) || tTotal <= 0) return 800;
+    const T_cyc = Math.abs(2 * Math.PI / track.omega);
+    const dt_step = T_cyc / 100; // 100 steps per orbit
+    return Math.min(10000, Math.max(200, Math.ceil(tTotal / dt_step)));
+  }
+
+  // Determine array direction: upstream (firstPos < 0) or downstream (firstPos > 0)
+  // Light recoil can go upstream only if mass_b < mass_target (A_b < A_t)
+  const Ab = parseInt(document.getElementById('rx-rec-A').value) || 1;
+  const At = parseInt(document.getElementById('rx-tgt-A').value) || 2;
+  const arrayUpstream = GEO.firstPos < 0;
+  const canGoUpstream = Ab < At;
+
+  // Magnet z-limits
+  const magnetZ = movableGroup ? movableGroup.position.z : 0;
+  const magnetHalf = 750;
+  const zMagMin = magnetZ - magnetHalf; // upstream end of magnet
+  const zMagMax = magnetZ + magnetHalf; // downstream end of magnet
+
+  // Compute light recoil track — keep regenerating until pz_lab has the right sign
+  // Upstream array: need pz_lab < 0 (thetaLab > 90°)
+  // Downstream array: need pz_lab > 0 (thetaLab < 90°)
+  let trackB_light = null;
+  let thetaCM_used = thetaCM, phiCM_used = phiCM;
+  let attempts = 0;
+  while (attempts < 50) {
+    thetaCM_used = useRandom ? Math.random()*170+5 : thetaCM;
+    phiCM_used   = useRandom ? Math.random()*360   : phiCM;
+    const t = computeTrack(REACTION.mass_b, REACTION.charge_b, thetaCM_used, phiCM_used, Ex, Bfield, true);
+    if (!t) { attempts++; continue; }
+    if (!useRandom) { trackB_light = t; break; } // manual: take as-is, show wherever it goes
+    if (arrayUpstream && canGoUpstream && t.vz < 0) { trackB_light = t; break; }
+    if (!arrayUpstream && t.vz > 0) { trackB_light = t; break; }
+    if (!canGoUpstream) { trackB_light = t; break; }
+    attempts++;
+  }
+
+  if (!trackB_light) {
+    document.getElementById('event-info').textContent = canGoUpstream ? 'Below threshold or no valid events.' : `A_b ≥ A_t: light recoil cannot go upstream. Showing downstream.`;
+    return;
+  }
+
+  if (!useRandom) {
+    document.getElementById('theta-cm').value = thetaCM_used.toFixed(1);
+    document.getElementById('phi-cm').value = phiCM_used.toFixed(1);
+  }
+
+  // Heavy recoil always downstream
+  const trackB_heavy = computeTrack(REACTION.mass_B, REACTION.charge_B, thetaCM_used, phiCM_used, Ex, Bfield, false);
+  if (!trackB_heavy) {
+    document.getElementById('event-info').textContent = 'Heavy recoil: below threshold.';
+    return;
+  }
+
+  // Sample trajectories — light goes in direction of vz, heavy always downstream
+  const lightZLimit = trackB_light.vz < 0 ? zMagMin : zMagMax;
+  const nLight = adaptiveN(trackB_light, lightZLimit);
+  const nHeavy = adaptiveN(trackB_heavy, zMagMax);
+  const ptsLight = sampleHelixPoints(trackB_light, lightZLimit, nLight);
+  const ptsHeavy = sampleHelixPoints(trackB_heavy, zMagMax, nHeavy);
+
+  // Debug info
+  const dbg = `vz_b=${trackB_light.vz.toFixed(1)} zLim=${lightZLimit.toFixed(0)} N=${nLight} pts=${ptsLight.length} | vz_B=${trackB_heavy.vz.toFixed(1)} zLim=${zMagMax.toFixed(0)} N=${nHeavy} pts=${ptsHeavy.length}`;
+  console.log('[gen]', dbg);
+
+  if (ptsLight.length < 2 || ptsHeavy.length < 2) {
+    document.getElementById('event-info').textContent = 'No track: ' + dbg;
+    document.getElementById('event-info').style.color = '#ff7b72';
+    return;
+  }
+
+  // Trim at hit points
+  function trimAtHit(pts, isLight) {
+    for (let i = 1; i < pts.length; i++) {
+      const pt = pts[i];
+      // Both particles stop at bore wall
+      const r = Math.sqrt(pt.x*pt.x + pt.y*pt.y);
+      if (r >= GEO.bore) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: false, hitTube: false, hitBore: true };
+      const stopOnSupport = document.getElementById('stop-on-support').checked;
+      if (isLight) {
+        // Stop on silicon detector hit
+        const hit = checkSiHit(pt, GEO);
+        if (hit) return { pts: pts.slice(0, i+1), hitDet: hit, hitRecoil: false, hitTube: false, hitBore: false };
+        // Stop on support tube hit (optional)
+        if (stopOnSupport && checkTubeHit(pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: false, hitTube: true, hitBore: false };
+      } else {
+        if (checkRecoilHit(pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: true, hitTube: false, hitBore: false };
+        if (stopOnSupport && checkTubeHit(pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: false, hitTube: true, hitBore: false };
+      }
+    }
+    return { pts, hitDet: null, hitRecoil: false, hitTube: false, hitBore: false };
+  }
+
+  const lightResult = trimAtHit(ptsLight, true);
+  const heavyResult = trimAtHit(ptsHeavy, false);
+
+  // Create animated track objects
+  function makeAnimTrack(pts, color, result, label) {
+    // Full path geometry (will reveal points progressively)
+    const positions = new Float32Array(pts.length * 3);
+    pts.forEach((p, i) => { positions[i*3]=p.x; positions[i*3+1]=p.y; positions[i*3+2]=p.z; });
+
+    const geo = new THREE.BufferGeometry();
+    const posAttr = new THREE.BufferAttribute(positions, 3);
+    geo.setAttribute('position', posAttr);
+    geo.setDrawRange(0, 1); // start hidden
+    const mat = new THREE.LineBasicMaterial({ color, linewidth: 2, transparent: true, opacity: 0.85 });
+    const line = new THREE.Line(geo, mat);
+    trackGroup.add(line);
+
+    // Dot (moving ball)
+    const dotMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(4, 12, 12),
+      new THREE.MeshBasicMaterial({ color })
+    );
+    dotMesh.position.set(pts[0].x, pts[0].y, pts[0].z);
+    trackGroup.add(dotMesh);
+
+    // Hit flash sphere (invisible until hit)
+    const flashMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(8, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 })
+    );
+    trackGroup.add(flashMesh);
+
+    return {
+      pts, line, geo, posAttr, dotMesh, flashMesh,
+      idx: 0, done: false, label,
+      hitDet: result.hitDet, hitRecoil: result.hitRecoil, hitTube: result.hitTube, hitBore: result.hitBore,
+      flashTimer: 0,
+    };
+  }
+
+  const animSpeed = parseInt(document.getElementById('anim-speed').value);
+  const lightAnim = makeAnimTrack(lightResult.pts, 0x44aaff, lightResult, 'Light (b)');
+  const heavyAnim = makeAnimTrack(heavyResult.pts, 0xff8844, heavyResult, 'Heavy (B)');
+  animations.push(lightAnim, heavyAnim);
+  eventHistory.push({ lightAnim, heavyAnim });
+  pruneOldTracks();
+
+  // Info panel
+  const lHit = lightResult.hitDet ? `Det ${lightResult.hitDet.id} ✓` : lightResult.hitTube ? 'Tube ■' : lightResult.hitBore ? 'Bore ○' : 'Miss';
+  const rHit = heavyResult.hitRecoil ? 'RDT ✓' : heavyResult.hitBore ? 'Bore ○' : 'Miss';
+  const dirLabel = trackB_light.vz < 0 ? '← upstream' : '→ downstream';
+  document.getElementById('event-info').innerHTML =
+    `θ_CM=${thetaCM_used.toFixed(1)}° φ=${phiCM_used.toFixed(1)}° ${dirLabel}<br>` +
+    `Ex=${Ex.toFixed(2)} MeV<br>` +
+    `<span style="color:#44aaff">b</span>: θ_lab=${trackB_light.thetaLab_deg.toFixed(1)}° &nbsp; Ek=${(trackB_light.E_kin).toFixed(1)} MeV &nbsp; ρ=${trackB_light.rho.toFixed(0)}mm<br>` +
+    `<span style="color:#44aaff">b hit</span>: <span style="color:${lightResult.hitDet?'#3fb950':'#ff7b72'}">${lHit}</span><br>` +
+    `<span style="color:#ff8844">B</span>: θ_lab=${trackB_heavy.thetaLab_deg.toFixed(1)}° &nbsp; Ek=${(trackB_heavy.E_kin/1000).toFixed(2)} GeV &nbsp; ρ=${trackB_heavy.rho.toFixed(0)}mm<br>` +
+    `<span style="color:#ff8844">B hit</span>: <span style="color:${heavyResult.hitRecoil?'#3fb950':'#ff7b72'}">${rHit}</span>`;
+  document.getElementById('event-info').style.color = '#e6edf3';
+}
+
+// Step the animation each frame
+function stepAnimations() {
+  const speed = parseInt(document.getElementById('anim-speed').value);
+  animations.forEach(anim => {
+    if (anim.done) {
+      // Flash decay
+      if (anim.flashTimer > 0) {
+        anim.flashTimer -= 0.05;
+        anim.flashMesh.material.opacity = Math.max(0, anim.flashTimer);
+      }
+      return;
+    }
+    const newIdx = Math.min(anim.idx + speed, anim.pts.length - 1);
+    anim.geo.setDrawRange(0, newIdx + 1);
+    anim.posAttr.needsUpdate = true;
+    const pt = anim.pts[newIdx];
+    anim.dotMesh.position.set(pt.x, pt.y, pt.z);
+    anim.idx = newIdx;
+
+    if (newIdx >= anim.pts.length - 1) {
+      anim.done = true;
+      // Hide dot, show flash if hit
+      if (anim.hitDet || anim.hitRecoil || anim.hitTube || anim.hitBore) {
+        anim.dotMesh.visible = false;
+        anim.flashMesh.position.set(pt.x, pt.y, pt.z);
+        anim.flashMesh.material.opacity = 1.0;
+        anim.flashMesh.material.color.set(
+          anim.hitDet ? 0xffffff :
+          anim.hitRecoil ? 0xff6688 :
+          anim.hitTube ? 0xffaa44 : 0x4488aa); // bore = blue flash
+        anim.flashTimer = 1.0;
+      } else {
+        anim.dotMesh.visible = false; // faded out — no hit
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HOVER / RAYCASTING
+// ═══════════════════════════════════════════════════════════════════
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let hoveredMesh = null;
+
+window.addEventListener('mousemove', e => {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+});
+
+function checkHover() {
+  if (!GEO || !detMeshes.length) return;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(detMeshes);
+  const tt = document.getElementById('tooltip');
+  if (hits.length > 0) {
+    const mesh = hits[0].object;
+    const det = mesh.userData.det;
+    if (hoveredMesh !== mesh) {
+      if (hoveredMesh) hoveredMesh.material.emissive = new THREE.Color(0,0,0);
+      mesh.material.emissive = new THREE.Color(0.3,0.3,0.0);
+      hoveredMesh = mesh;
+    }
+    document.getElementById('tt-id').textContent = `Det ${det.id.toString().padStart(2,'0')}`;
+    const sideLabel = {0:'+X',1:'+Y',2:'-X',3:'-Y'}[det.row] || det.row;
+    document.getElementById('tt-row').textContent = `${det.row} (${sideLabel})`;
+    document.getElementById('tt-col').textContent = det.col;
+    document.getElementById('tt-phi').textContent = det.phi_deg + '°';
+    document.getElementById('tt-z').textContent = det.z_center.toFixed(1) + ' mm';
+    tt.style.display = 'block';
+  } else {
+    if (hoveredMesh) { hoveredMesh.material.emissive = new THREE.Color(0,0,0); hoveredMesh = null; }
+    tt.style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// UI CONTROLS
+// ═══════════════════════════════════════════════════════════════════
+
+document.getElementById('bore-opacity').addEventListener('input', function() {
+  const v = parseInt(this.value)/100;
+  if (boreGroup) boreGroup.traverse(c => { if (c.material) c.material.opacity = v; });
+});
+document.getElementById('color-mode').addEventListener('change', updateColors);
+document.getElementById('reset-view-btn').addEventListener('click', () => {
+  camera.position.set(80, 60, 300);
+  controls.target.set(0, 0, 0);
+  controls.update();
+});
+
+document.getElementById('show-bore').addEventListener('change', function() { if(boreGroup) boreGroup.visible = this.checked; });
+
+document.getElementById('support-opacity').addEventListener('input', function() {
+  const v = parseInt(this.value) / 100;
+  tubeMeshes.forEach(m => {
+    m.material.transparent = v < 1.0;
+    m.material.opacity = v;
+    // Keep depthWrite true always so depth buffer is correct.
+    // Use renderOrder + polygonOffset to push tube behind detectors when transparent.
+    m.material.depthWrite = true;
+    m.material.polygonOffset = v < 1.0;
+    m.material.polygonOffsetFactor = v < 1.0 ? 1 : 0;
+    m.material.polygonOffsetUnits  = v < 1.0 ? 1 : 0;
+    m.renderOrder = v < 1.0 ? 1 : 0; // render after opaque objects when transparent
+    m.material.needsUpdate = true;
+  });
+});
+document.getElementById('show-recoil').addEventListener('change', function() { if(recoilGroup) recoilGroup.visible = this.checked; });
+
+document.getElementById('show-axes').addEventListener('change', function() {
+  if(axisGroup) axisGroup.visible = this.checked;
+  if(zAxisGroup) zAxisGroup.visible = this.checked;
+  if(beamArrowGroup) beamArrowGroup.visible = this.checked;
+});
+document.getElementById('gen-btn').addEventListener('click', () => {
+  try { generateEvent(false); }
+  catch(e) {
+    document.getElementById('event-info').textContent = 'Error: ' + e.message;
+    document.getElementById('event-info').style.color = '#ff7b72';
+    console.error(e);
+  }
+});
+document.getElementById('clear-btn').addEventListener('click', () => { stopAutoGen(); clearTracks(); });
+
+document.getElementById('gen-rate').addEventListener('input', function() {
+  document.getElementById('gen-rate-val').textContent = this.value + '/s';
+  if (isAutoGen) { stopAutoGen(); startAutoGen(); } // restart with new rate
+});
+document.getElementById('keep-n').addEventListener('input', function() {
+  document.getElementById('keep-n-val').textContent = this.value;
+  pruneOldTracks();
+});
+
+function startAutoGen() {
+  if (!GEO) return;
+  isAutoGen = true;
+  document.getElementById('auto-btn').textContent = '⏸ Stop Auto';
+  document.getElementById('auto-btn').classList.add('active');
+  const rate = parseInt(document.getElementById('gen-rate').value);
+  const intervalMs = 1000 / rate;
+  autoGenInterval = setInterval(() => generateEvent(true), intervalMs);
+}
+
+function stopAutoGen() {
+  isAutoGen = false;
+  if (autoGenInterval) { clearInterval(autoGenInterval); autoGenInterval = null; }
+  document.getElementById('auto-btn').textContent = '▶▶ Auto Generate';
+  document.getElementById('auto-btn').classList.remove('active');
+}
+
+document.getElementById('auto-btn').addEventListener('click', () => {
+  if (isAutoGen) stopAutoGen(); else startAutoGen();
+});
+
+document.getElementById('target-z').addEventListener('input', function() {
+  const zOff = parseInt(this.value);
+  document.getElementById('target-z-val').textContent = (zOff >= 0 ? '+' : '') + zOff + ' mm';
+  if (movableGroup) movableGroup.position.z = zOff;
+  buildBeamArrow();
+  clearTracks();
+});
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// MAIN LOOP
+// ═══════════════════════════════════════════════════════════════════
+let autoRotAngle = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  const speed = parseInt(document.getElementById('rotate-speed').value);
+  if (speed > 0) {
+    // Orbit camera around Y-axis, pivoting at controls.target
+    const tx = controls.target.x, tz = controls.target.z;
+    const dx = camera.position.x - tx;
+    const dz = camera.position.z - tz;
+    const r = Math.sqrt(dx*dx + dz*dz);
+    if (r > 1) {
+      const angle = Math.atan2(dx, dz) + speed * 0.0002;
+      camera.position.x = tx + r * Math.sin(angle);
+      camera.position.z = tz + r * Math.cos(angle);
+      // Don't call lookAt — let OrbitControls handle camera orientation
+      controls.update();
+    }
+  }
+  stepAnimations();
+  controls.update();
+  checkHover();
+  renderer.render(scene, camera);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// GEOMETRY PANEL — load from digios + apply
+// ═══════════════════════════════════════════════════════════════════
+// Rebuild labels whenever reaction A/Z fields change
+['rx-beam-A','rx-beam-Z'].forEach(id => document.getElementById(id).addEventListener('input', buildBeamArrow));
+['rx-tgt-A','rx-tgt-Z'].forEach(id => document.getElementById(id).addEventListener('input', buildTarget));
+
+// Reaction panel — load from helios_reaction.json on startup
+async function loadReactionJson() {
+  try {
+    const r = await fetch('/api/reaction_config');
+    const d = await r.json();
+    if (d.ok && d.reaction) applyReactionConfig(d.reaction);
+  } catch(e) { /* standalone mode — no server or file */ }
+}
+
+function applyReactionConfig(rx) {
+  if (rx.beam_A)         document.getElementById('rx-beam-A').value = rx.beam_A;
+  if (rx.beam_Z)         document.getElementById('rx-beam-Z').value = rx.beam_Z;
+  if (rx.target_A)       document.getElementById('rx-tgt-A').value  = rx.target_A;
+  if (rx.target_Z)       document.getElementById('rx-tgt-Z').value  = rx.target_Z;
+  if (rx.recoil_light_A) document.getElementById('rx-rec-A').value  = rx.recoil_light_A;
+  if (rx.recoil_light_Z) document.getElementById('rx-rec-Z').value  = rx.recoil_light_Z;
+  if (rx.beam_energy_MeVu) document.getElementById('rx-energy').value = rx.beam_energy_MeVu;
+  // Update kinematics
+  if (rx.mass_b)  REACTION.mass_b  = rx.mass_b;
+  if (rx.charge_b) REACTION.charge_b = rx.charge_b;
+  if (rx.betaCM)  REACTION.betaCM  = rx.betaCM;
+  if (rx.Ecm)     REACTION.Ecm     = rx.Ecm;
+  if (rx.mass_B)  REACTION.mass_B  = rx.mass_B;
+  if (rx.charge_B) REACTION.charge_B = rx.charge_B;
+  // Labels
+  buildBeamArrow();
+  buildTarget();
+  const rxStr = rx.reaction_str || `${rx.beam_label || '?'}+${rx.target_label || '?'}`;
+  document.getElementById('rx-status').textContent =
+    `${rxStr}  Q=${rx.Q !== undefined ? rx.Q.toFixed(3)+' MeV' : '?'}  betaCM=${rx.betaCM ? rx.betaCM.toFixed(5) : '?'}`;
+  document.getElementById('rx-status').style.color = '#3fb950';
+  clearTracks();
+}
+
+document.getElementById('rx-build-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('rx-build-btn');
+  const status = document.getElementById('rx-status');
+  btn.disabled = true; btn.textContent = '⟳ Computing...';
+  // Save current fields to helios_reaction.json
+  const rxData = {
+    beam_A:           parseInt(document.getElementById('rx-beam-A').value),
+    beam_Z:           parseInt(document.getElementById('rx-beam-Z').value),
+    target_A:         parseInt(document.getElementById('rx-tgt-A').value),
+    target_Z:         parseInt(document.getElementById('rx-tgt-Z').value),
+    recoil_light_A:   parseInt(document.getElementById('rx-rec-A').value),
+    recoil_light_Z:   parseInt(document.getElementById('rx-rec-Z').value),
+    beam_energy_MeVu: parseFloat(document.getElementById('rx-energy').value),
+    Bfield:           GEO ? GEO.Bfield : -3.0,
+  };
+  try {
+    // Save to helios_reaction.json
+    await fetch('/api/reaction_config', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(rxData)
+    });
+    // Run build_reaction.py
+    const r = await fetch('/api/build_reaction');
+    const d = await r.json();
+    if (d.ok) {
+      applyReactionConfig(d.reaction);
+      status.textContent = 'Computed: ' + (d.reaction.reaction_str || '') + '  Q=' + (d.reaction.Q||0).toFixed(3) + ' MeV';
+      status.style.color = '#3fb950';
+    } else {
+      status.textContent = '⚠ ' + d.error;
+      status.style.color = '#ff7b72';
+    }
+  } catch(e) {
+    status.textContent = 'Server unavailable — mass table not found or no server.';
+    status.style.color = '#ff7b72';
+  }
+  btn.disabled = false; btn.textContent = '⚙ Compute';
+});
+
+document.getElementById('bfield').addEventListener('input', function() {
+  const v = parseFloat(this.value);
+  document.getElementById('bfield-val').textContent = (v >= 0 ? '+' : '') + v.toFixed(1) + ' T';
+  if (GEO) GEO.Bfield = v;
+  clearTracks();
+});
+
+document.getElementById('load-config-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('load-config-btn');
+  const status = document.getElementById('config-status');
+  btn.disabled = true; btn.textContent = '⟳ Loading...';
+  try {
+    const r = await fetch('/api/config');
+    const d = await r.json();
+    if (d.errors && d.errors.length) {
+      status.textContent = '⚠ ' + d.errors.join(' | ');
+      status.style.color = '#ff7b72';
+    }
+    if (d.detGeo) {
+      document.getElementById('array-pos').value = d.detGeo.firstPos;
+      document.getElementById('rdt-pos').value = d.detGeo.recoilPos;
+      const bf = d.detGeo.Bfield;
+      document.getElementById('bfield').value = bf;
+      document.getElementById('bfield-val').textContent = (bf >= 0 ? '+' : '') + bf.toFixed(1) + ' T';
+      if (GEO) GEO.Bfield = bf;
+      // Update B-field display in geo-info
+      status.textContent = `Loaded: firstPos=${d.detGeo.firstPos}mm  RDT=${d.detGeo.recoilPos}mm  B=${d.detGeo.Bfield}T  bore=${d.detGeo.bore}mm`;
+      status.style.color = '#3fb950';
+    }
+    if (d.reactionConfig) {
+      applyReactionConfig({
+        beam_A: d.reactionConfig.beam_A, beam_Z: d.reactionConfig.beam_Z,
+        target_A: d.reactionConfig.target_A, target_Z: d.reactionConfig.target_Z,
+        recoil_light_A: d.reactionConfig.recoil_light_A, recoil_light_Z: d.reactionConfig.recoil_light_Z,
+        beam_energy_MeVu: d.reactionConfig.beam_energy_MeVu,
+        beam_label: d.reactionConfig.beam_label, target_label: d.reactionConfig.target_label,
+      });
+    }
+    if (d.reactionConfig && d.reactionConfig.beam_label) {
+      buildBeamArrow();
+      buildTarget();
+      // Also update charge_B from reactionConfig (beam_A - recoil_light_A, beam_Z - recoil_light_Z)
+      REACTION.charge_B = (d.reactionConfig.beam_Z || 14) + 1 - (d.reactionConfig.recoil_light_Z || 1); // Z_A + Z_a - Z_b
+    }
+    if (d.reaction) {
+      // Update REACTION constants live
+      REACTION.mass_b  = d.reaction.mass_b;
+      REACTION.charge_b = d.reaction.charge_b;
+      REACTION.betaCM  = d.reaction.betaCM;
+      REACTION.Ecm     = d.reaction.Ecm;
+      REACTION.mass_B  = d.reaction.mass_B;
+      REACTION.alpha   = d.reaction.alpha;
+      status.textContent += `  | mb=${d.reaction.mass_b.toFixed(0)} mB=${d.reaction.mass_B.toFixed(0)} MeV`;
+    }
+  } catch(e) {
+    status.textContent = 'Load failed: ' + e;
+    status.style.color = '#ff7b72';
+  }
+  btn.disabled = false; btn.textContent = '↓ Load from digios';
+});
+
+document.getElementById('apply-geo-btn').addEventListener('click', async () => {
+  if (!GEO) return;
+  const newFirstPos = parseFloat(document.getElementById('array-pos').value);
+  const newRDTPos   = parseFloat(document.getElementById('rdt-pos').value);
+  const status = document.getElementById('config-status');
+  const btn = document.getElementById('apply-geo-btn');
+  btn.disabled = true;
+
+  // Rebuild geometry JSON via server, then reload
+  try {
+    // First update GEO values directly for immediate effect
+    // Shift all detectors by delta
+    const delta = newFirstPos - GEO.firstPos;
+    GEO.detectors.forEach(d => {
+      d.z_near   += delta;
+      d.z_center += delta;
+      d.z        += delta;
+    });
+    GEO.firstPos = newFirstPos;
+    GEO.zMin += delta;
+    GEO.zMax += delta;
+    GEO._tubeZMin += delta;
+    GEO._tubeZMax += delta;
+
+    // Update RDT
+    GEO.recoilPos = newRDTPos;
+
+    // Rebuild scene with new geometry
+    // Remove old detector meshes + tube + recoil
+    detMeshes.forEach(m => scene.remove(m));
+    detMeshes = [];
+    scene.remove(recoilGroup);
+    // Remove tube (not tracked — rebuild everything)
+    // Simplest: reload page geometry from rebuilt JSON
+    const r2 = await fetch('/api/rebuild_geo');
+    const rb = await r2.json();
+    if (rb.ok) {
+      status.textContent = 'Rebuilt. Reloading geometry...';
+      // Reload geometry JSON
+      const geoR = await fetch('helios_geometry.json?t=' + Date.now());
+      GEO = await geoR.json();
+      GEO._tubeHalf = 10.5;
+      GEO._tubeZMin = GEO.zMin;
+      GEO._tubeZMax = GEO.zMax;
+      GEO.recoilPos = newRDTPos;
+      // Rebuild scene
+      clearTracks();
+      while(scene.children.length > 0) scene.remove(scene.children[0]);
+      scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+      const d1 = new THREE.DirectionalLight(0xffffff, 0.8); d1.position.set(200,300,200); scene.add(d1);
+      const d2 = new THREE.DirectionalLight(0x88aaff, 0.3); d2.position.set(-200,-100,-200); scene.add(d2);
+      trackGroup = new THREE.Group(); scene.add(trackGroup);
+      movableGroup = null; boreGroup = null; recoilGroup = null; axisGroup = null;
+      buildScene();
+      status.textContent = `Applied: firstPos=${newFirstPos}mm  RDT=${newRDTPos}mm`;
+      status.style.color = '#3fb950';
+    } else {
+      status.textContent = 'Rebuild failed: ' + rb.error;
+      status.style.color = '#ff7b72';
+    }
+  } catch(e) {
+    status.textContent = 'Apply failed: ' + e;
+    status.style.color = '#ff7b72';
+  }
+  btn.disabled = false;
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════
+animate();
+loadReactionJson();
+fetch('helios_geometry.json')
+  .then(r => r.json())
+  .then(data => {
+    GEO = data;
+    buildScene();
+    // Sync B-field slider to loaded geometry
+    document.getElementById('bfield').value = data.Bfield;
+    document.getElementById('bfield-val').textContent = (data.Bfield >= 0 ? '+' : '') + data.Bfield.toFixed(1) + ' T';
+    document.getElementById('status').textContent = `☀ ${data.nDet*data.mDet} dets loaded | port 8765`;
+  })
+  .catch(e => {
+    document.getElementById('geo-info').textContent = '✗ Failed to load geometry';
+    console.error(e);
+  });
+</script>
+</body>
+</html>
