@@ -167,9 +167,46 @@
   <div class="li"><div class="sw" style="background:#ff8844;"></div><span>Heavy recoil (B)</span></div>
 </div>
 <div id="status">—</div>
-<script src="three.min.js"></script>
-<script src="OrbitControls.js"></script>
+
+<!-- Loading overlay -->
+<div id="loading-overlay" style="position:fixed;inset:0;background:#0d1117;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;">
+  <div style="font-size:28px;color:#ffa657;margin-bottom:16px;">☀ HELIOS</div>
+  <div id="loading-msg" style="font-size:14px;color:#8b949e;font-family:monospace;">Loading Three.js...</div>
+  <div id="loading-bar-wrap" style="width:260px;height:4px;background:#21262d;border-radius:2px;margin-top:16px;">
+    <div id="loading-bar" style="width:0%;height:100%;background:#ffa657;border-radius:2px;transition:width 0.3s;"></div>
+  </div>
+  <div id="webgl-error" style="display:none;margin-top:20px;color:#ff7b72;font-size:13px;text-align:center;max-width:360px;">
+    ⚠ WebGL not available.<br>Please use a modern browser (Chrome/Firefox/Edge).
+  </div>
+</div>
+
+<script src="three.min.js" onload="document.getElementById('loading-msg').textContent='Loading controls...';document.getElementById('loading-bar').style.width='40%';"></script>
+<script src="OrbitControls.js" onload="document.getElementById('loading-msg').textContent='Initializing scene...';document.getElementById('loading-bar').style.width='70%';"></script>
 <script>
+// WebGL check
+(function() {
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+    if (!gl) throw new Error('no webgl');
+  } catch(e) {
+    document.getElementById('loading-msg').style.display = 'none';
+    document.getElementById('loading-bar-wrap').style.display = 'none';
+    document.getElementById('webgl-error').style.display = 'block';
+    throw e;
+  }
+})();
+
+function setLoadingProgress(pct, msg) {
+  const bar = document.getElementById('loading-bar');
+  const txt = document.getElementById('loading-msg');
+  if (bar) bar.style.width = pct + '%';
+  if (txt && msg) txt.textContent = msg;
+}
+function hideLoading() {
+  const el = document.getElementById('loading-overlay');
+  if (el) { el.style.opacity = '0'; el.style.transition = 'opacity 0.4s'; setTimeout(() => el.remove(), 400); }
+}
 // ═══════════════════════════════════════════════════════════════════
 // PHYSICS: Helical orbit in solenoidal B-field
 // Mirrors HELIOS_LIB.h CalExThetaCM / trajectory equations
@@ -317,6 +354,21 @@ function sampleHelixPoints(track, zLimit, nSteps) {
   const pts = [];
   for (let i = 0; i <= nSteps; i++) {
     pts.push(track.helixPointT(i * dt));
+  }
+  return pts;
+}
+
+// Sample helix uniformly in Z — nSteps divisions from z=0 to zEnd
+function sampleHelixPointsZ(track, zEnd, nSteps) {
+  const vz = track.vz;
+  if (Math.abs(vz) < 0.001) return [];
+  const pts = [];
+  const dz = zEnd / nSteps;
+  for (let i = 0; i <= nSteps; i++) {
+    const z = i * dz;
+    const t = z / vz; // time to reach this z
+    if (!isFinite(t)) break;
+    pts.push(track.helixPointT(t));
   }
   return pts;
 }
@@ -869,12 +921,14 @@ function generateEvent(autoMode = false) {
   // Sample trajectories — light goes in direction of vz, heavy always downstream
   const lightZLimit = trackB_light.vz < 0 ? zMagMin : zMagMax;
   const nLight = adaptiveN(trackB_light, lightZLimit);
-  const nHeavy = adaptiveN(trackB_heavy, zMagMax);
   const ptsLight = sampleHelixPoints(trackB_light, lightZLimit, nLight);
-  const ptsHeavy = sampleHelixPoints(trackB_heavy, zMagMax, nHeavy);
+
+  // Heavy recoil: track to RDT + 100 mm always; hit/miss determined in trimAtHit
+  const heavyZMax = GEO.recoilPos + 100;
+  const ptsHeavy = sampleHelixPointsZ(trackB_heavy, heavyZMax, 300);
 
   // Debug info
-  const dbg = `vz_b=${trackB_light.vz.toFixed(1)} zLim=${lightZLimit.toFixed(0)} N=${nLight} pts=${ptsLight.length} | vz_B=${trackB_heavy.vz.toFixed(1)} zLim=${zMagMax.toFixed(0)} N=${nHeavy} pts=${ptsHeavy.length}`;
+  const dbg = `vz_b=${trackB_light.vz.toFixed(1)} zLim=${lightZLimit.toFixed(0)} N=${nLight} pts=${ptsLight.length} | vz_B=${trackB_heavy.vz.toFixed(1)} zMax=${heavyZMax.toFixed(0)} pts=${ptsHeavy.length}`;
   console.log('[gen]', dbg);
 
   if (ptsLight.length < 2 || ptsHeavy.length < 2) {
@@ -932,8 +986,8 @@ function generateEvent(autoMode = false) {
 
     // Hit flash sphere (invisible until hit)
     const flashMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(8, 12, 12),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 })
+      new THREE.SphereGeometry(4, 12, 12),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false })
     );
     trackGroup.add(flashMesh);
 
@@ -992,10 +1046,7 @@ function stepAnimations() {
         anim.dotMesh.visible = false;
         anim.flashMesh.position.set(pt.x, pt.y, pt.z);
         anim.flashMesh.material.opacity = 1.0;
-        anim.flashMesh.material.color.set(
-          anim.hitDet ? 0xffffff :
-          anim.hitRecoil ? 0xff6688 :
-          anim.hitTube ? 0xffaa44 : 0x4488aa); // bore = blue flash
+        // Keep particle color — no override
         anim.flashTimer = 1.0;
       } else {
         anim.dotMesh.visible = false; // faded out — no hit
@@ -1374,19 +1425,24 @@ document.getElementById('apply-geo-btn').addEventListener('click', async () => {
 // INIT
 // ═══════════════════════════════════════════════════════════════════
 animate();
+setLoadingProgress(80, 'Loading geometry...');
 loadReactionJson();
 fetch('helios_geometry.json')
   .then(r => r.json())
   .then(data => {
+    setLoadingProgress(95, 'Building scene...');
     GEO = data;
     buildScene();
-    // Sync B-field slider to loaded geometry
     document.getElementById('bfield').value = data.Bfield;
     document.getElementById('bfield-val').textContent = (data.Bfield >= 0 ? '+' : '') + data.Bfield.toFixed(1) + ' T';
     document.getElementById('status').textContent = `☀ ${data.nDet*data.mDet} dets loaded | port 8765`;
+    setLoadingProgress(100, 'Ready.');
+    hideLoading();
   })
   .catch(e => {
-    document.getElementById('geo-info').textContent = '✗ Failed to load geometry';
+    document.getElementById('geo-info').textContent = '✕ Failed to load geometry';
+    const lm = document.getElementById('loading-msg');
+    if (lm) { lm.textContent = '✕ Failed to load helios_geometry.json'; lm.style.color='#ff7b72'; }
     console.error(e);
   });
 </script>
