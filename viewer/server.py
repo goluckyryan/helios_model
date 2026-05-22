@@ -17,7 +17,7 @@ DETECTOR_GEO   = os.path.join(DIGIOS_WORKING, 'detectorGeo.txt')
 REACTION_DAT   = os.path.join(DIGIOS_WORKING, 'reaction.dat')
 REACTION_CFG   = os.path.join(DIGIOS_WORKING, 'reactionConfig.txt')
 BUILD_GEO_PY   = os.path.join(os.path.dirname(DIR), 'build_geometry.py')
-GEO_JSON       = os.path.join(DIR, 'helios_geometry.json')
+GEO_JSON       = os.path.join(os.path.dirname(DIR), 'helios_geometry.json')
 
 def parse_detgeo(path):
     """Parse detectorGeo.txt into a dict."""
@@ -148,7 +148,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == '/api/data':
+        if self.path == '/helios_geometry.json':
+            # Serve helios_geometry.json from root folder
+            try:
+                with open(GEO_JSON, 'rb') as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', len(body))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception:
+                self.send_response(404); self.end_headers()
+
+        elif self.path == '/api/data':
             # Placeholder for live EPICS data
             # Format: {"0": value, ...} keyed by detector ID
             self.send_json({})

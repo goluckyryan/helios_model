@@ -92,8 +92,8 @@
     <div class="sep"></div>
     <div class="control"><label>Magnet Z offset</label><span id="target-z-val" style="color:#ffa657;min-width:48px;text-align:right;">0 mm</span></div>
     <div class="control" style="flex-direction:column;align-items:stretch;gap:4px;">
-      <input type="range" id="target-z" min="-500" max="500" value="0" step="5" style="width:100%;">
-      <div style="display:flex;justify-content:space-between;font-size:10px;color:#484f58;"><span>-500mm</span><span>0</span><span>+500mm</span></div>
+      <input type="range" id="target-z" min="-600" max="600" value="0" step="5" style="width:100%;">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#484f58;"><span>-600mm</span><span>0</span><span>+600mm</span></div>
       <div style="display:flex;justify-content:space-between;font-size:10px;color:#484f58;margin-top:2px;"><span>← upstream</span><span>downstream →</span></div>
     </div>
     <div class="sep"></div>
@@ -120,7 +120,7 @@
       <div class="control"><label>θ_CM (deg)</label><input type="number" id="theta-cm" value="45" min="0" max="180" step="1"></div>
       <div class="control"><label>φ_CM (deg)</label><input type="number" id="phi-cm" value="30" min="0" max="360" step="1"></div>
       <div class="control"><label>Ex (MeV)</label><input type="number" id="ex-mev" value="0" min="0" max="10" step="0.1"></div>
-      <div class="control"><label>Anim speed</label><input type="range" id="anim-speed" min="1" max="20" value="8"></div>
+      <div class="control"><label>Anim speed</label><input type="range" id="anim-speed" min="1" max="10" value="1"></div>
       <div class="control" style="display:flex;align-items:center;gap:4px;"><label>Random θ,φ</label><input type="checkbox" id="random-angles" checked style="margin-left:4px;"><span style="color:#8b949e;font-size:10px;margin-left:6px;">max</span><input type="number" id="max-theta" value="60" min="1" max="180" step="1" style="width:44px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:1px 3px;font-size:11px;"><span style="color:#8b949e;font-size:10px;">°</span></div>
       <div class="control"><label>Stop on support</label><input type="checkbox" id="stop-on-support" checked style="margin-left:8px;"></div>
       <div class="control"><label>Rate /sec</label><input type="range" id="gen-rate" min="1" max="10" value="3" step="1"><span id="gen-rate-val" style="color:#ffa657;">3/s</span></div>
@@ -238,25 +238,36 @@ function hideLoading() {
 // ═══════════════════════════════════════════════════════════════════
 const C = 299.792458; // mm/ns
 
-// reaction.dat values (33Si(d,p)34Si, Elab=20 MeV/u * 33 = 660 MeV)
-const REACTION = {
-  mass_b: 938.2720,   // MeV/c^2  light recoil (proton)
-  charge_b: 1,
-  betaCM: 0.14608743,
-  Ecm: 29810.5622,    // MeV
-  mass_B: 28846.2128, // MeV/c^2  heavy recoil
-  charge_B: 14,       // 33Si -> 34Si, Z=14
-  alpha: 0.1360,      // slope/betaRect (MeV/mm)
+// ── FALLBACK SETTINGS ────────────────────────────────────────────────────────
+// Used when helios_geometry.json or helios_reaction.json cannot be loaded.
+// These are overwritten at startup by loadReactionJson() and fetch('helios_geometry.json').
+// Also overwritten by 'Load digios' and '⚙ Compute'.
+// Update these if you want a different standalone default (e.g. a new experiment).
+const FALLBACK = {
+  // Geometry (mirrors detectorGeo.txt defaults)
+  firstPos:   -121,    // mm, array near edge (upstream)
+  recoilPos:  1000,    // mm, RDT position
+  Bfield:     -3.0,    // T, magnetic field
+  bore:        462.5,  // mm
+  // Reaction kinematics (proton from d+beam reaction)
+  mass_b:    938.2720,    // MeV/c^2  light recoil
+  charge_b:  1,
+  betaCM:    0.14608743,
+  Ecm:       29810.5622,  // MeV, total CM energy
+  mass_B:    28846.2128,  // MeV/c^2  heavy recoil
+  charge_B:  14,
+  alpha:     0.1360,
 };
+// REACTION points to FALLBACK — same object, readable alias for physics code
+const REACTION = FALLBACK;
 
-function gammaCM(beta) { return 1.0 / Math.sqrt(1 - beta * beta); }
 
 function computeTrack(mass, charge, thetaCM_deg, phiCM_deg, Ex_MeV, Bfield_T, isLight) {
   // CM kinematics: 2-body decay
   const tCM = thetaCM_deg * Math.PI / 180;
   const pCM_deg = phiCM_deg * Math.PI / 180;
   const beta = REACTION.betaCM;
-  const gam = gammaCM(beta);
+  const gam = 1.0 / Math.sqrt(1 - beta * beta);
   const Ex = Ex_MeV;
 
   // CM momentum of light recoil b
@@ -456,16 +467,16 @@ function updateColors() {
 }
 
 function autoPositionMagnet(geo) {
-  // Position magnet to cover the array + buffer, clamp to slider range
-  const magnetHalf = 750;
-  const buffer = 100;
-  const nDet = geo.nDet || 6;
-  const detLength = geo.length || 50;
-  const arrayLen = nDet * detLength + (nDet-1) * 5;
-  const fp = geo.firstPos;
-  const arrayFarZ = fp < 0 ? fp - arrayLen : fp + arrayLen;
-  let mz = fp < 0 ? arrayFarZ - buffer + magnetHalf : arrayFarZ + buffer - magnetHalf;
-  mz = Math.max(-400, Math.min(400, Math.round(mz)));
+  // Magnet center = midpoint of the full span: target(z=0), RDT, and array extents
+  // magnet_center = ( min(0, RDT, arrayMin) + max(0, RDT, arrayMax) ) / 2
+  const target = 0;  // target always at z=0
+  const rdt    = geo.recoilPos || FALLBACK.recoilPos;
+  const arrayMin = geo.zMin || geo.firstPos || FALLBACK.firstPos;
+  const arrayMax = geo.zMax || geo.firstPos || FALLBACK.firstPos;
+  const spanMin = Math.min(target, rdt, arrayMin);
+  const spanMax = Math.max(target, rdt, arrayMax);
+  let mz = Math.round((spanMin + spanMax) / 2);
+  mz = Math.max(-600, Math.min(600, mz)); // clamp to slider range
   document.getElementById('target-z').value = mz;
   document.getElementById('target-z-val').textContent = (mz >= 0 ? '+' : '') + mz + ' mm';
   if (movableGroup) movableGroup.position.z = mz;
@@ -1290,8 +1301,8 @@ function animate() {
 // ═══════════════════════════════════════════════════════════════════
 // Rebuild labels whenever reaction A/Z fields change
 // Symbol shorthand resolver for reaction inputs
-const RX_SHORTHAND = HELIOS_SHORTHAND;
-const RX_EL = ELEMENT_SYMBOLS;
+// HELIOS_SHORTHAND from helios_common.js
+// ELEMENT_SYMBOLS from helios_common.js
 
 function resolveSymbol(role) {
   const prefix = role==='recoil' ? 'rx-rec' : role==='beam' ? 'rx-beam' : 'rx-tgt';
@@ -1299,13 +1310,13 @@ function resolveSymbol(role) {
   const info = document.getElementById(prefix+'-info');
   if (!inp) return;
   const raw = inp.value.trim();
-  const resolved = RX_SHORTHAND[raw] || RX_SHORTHAND[raw.toLowerCase()] || raw;
+  const resolved = HELIOS_SHORTHAND[raw] || HELIOS_SHORTHAND[raw.toLowerCase()] || raw;
   inp.value = resolved;
   const m = resolved.match(/^(\d+)([A-Za-z]+)$/);
   if (!m) { if(info){ info.textContent='?'; info.style.color='#ff7b72'; } return; }
   const A = parseInt(m[1]);
   const sym = m[2];
-  const Z = RX_EL.findIndex(s => s.toLowerCase()===sym.toLowerCase());
+  const Z = ELEMENT_SYMBOLS.findIndex(s => s.toLowerCase()===sym.toLowerCase());
   if (Z < 0) { if(info){ info.textContent='unknown'; info.style.color='#ff7b72'; } return; }
   document.getElementById(prefix+'-A').value = A;
   document.getElementById(prefix+'-Z').value = Z;
@@ -1329,7 +1340,7 @@ async function loadReactionJson() {
 
 const azToSym = heliosNuclideName;
 function _azToSym_unused(A, Z) {
-  return A + (RX_EL[Z] || ('Z'+Z));
+  return A + (ELEMENT_SYMBOLS[Z] || ('Z'+Z));
 }
 function applyReactionConfig(rx) {
   if (rx.beam_A)         document.getElementById('rx-beam-A').value = rx.beam_A;

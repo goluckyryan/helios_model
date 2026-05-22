@@ -7,8 +7,11 @@ __pycache__/
 /tmp/helios_server.log
 nohup.out
 
-# Computed files (auto-generated, not hand-edited)
+# Computed files (auto-generated from digios or build scripts)
+# FALLBACK in index.html provides defaults when these are absent
 reaction.dat
+helios_geometry.json
+helios_reaction.json
 
 # OS
 .DS_Store

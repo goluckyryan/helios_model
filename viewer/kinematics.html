@@ -306,10 +306,7 @@
 // Constants & state (mirrors heliosmatics.js)
 const c = 299.792468; // mm/ns
 
-const SHORTHAND = {
-  'p':'1H','d':'2H','t':'3H','h':'3He','a':'4He',
-  'D':'2H','T':'3H','H':'3He','A':'4He','alpha':'4He'
-};
+const SHORTHAND = HELIOS_SHORTHAND;
 
 const COLORS = [
   'rgb(31,119,180)','rgb(255,127,14)','rgb(44,160,44)',
@@ -935,7 +932,7 @@ async function loadFromServerFull() {
         const rx = rbd.reaction;
         // Populate nucCache from freshly computed values
         const EL_full = ELEMENT_SYMBOLS;
-        function azLabel(A, Z) { return A + (EL_full[Z] || '?'); }
+        const azLabel = heliosNuclideName;
         nucCache.beam   = { A: parseInt(rc.beam_A),         Z: parseInt(rc.beam_Z),         mass: rx.Ma,     name: rx.beam_label };
         nucCache.target = { A: parseInt(rc.target_A),       Z: parseInt(rc.target_Z),       mass: rx.Mt,     name: rx.target_label };
         nucCache.light  = { A: parseInt(rc.recoil_light_A), Z: parseInt(rc.recoil_light_Z), mass: rx.mass_b, name: rx.recoil_light_label };

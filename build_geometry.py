@@ -171,7 +171,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('geo_path', nargs='?', default='detectorGeo.txt')
-    parser.add_argument('out_path', nargs='?', default='viewer/helios_geometry.json')
+    parser.add_argument('out_path', nargs='?', default='helios_geometry.json')
     parser.add_argument('--firstPos', type=float, default=None, help='Override firstPos (mm)')
     parser.add_argument('--recoilPos', type=float, default=None, help='Override recoilPos (mm)')
     args = parser.parse_args()
