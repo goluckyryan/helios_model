@@ -168,14 +168,34 @@ def load_geometry(geo_file="detectorGeo.txt"):
     return geometry
 
 if __name__ == "__main__":
-    geo_path = sys.argv[1] if len(sys.argv) > 1 else "detectorGeo.txt"
-    out_path = sys.argv[2] if len(sys.argv) > 2 else "viewer/helios_geometry.json"
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('geo_path', nargs='?', default='detectorGeo.txt')
+    parser.add_argument('out_path', nargs='?', default='viewer/helios_geometry.json')
+    parser.add_argument('--firstPos', type=float, default=None, help='Override firstPos (mm)')
+    parser.add_argument('--recoilPos', type=float, default=None, help='Override recoilPos (mm)')
+    args = parser.parse_args()
 
-    if not os.path.exists(geo_path):
-        print(f"ERROR: {geo_path} not found")
+    if not os.path.exists(args.geo_path):
+        print(f"ERROR: {args.geo_path} not found")
         sys.exit(1)
 
-    geo = load_geometry(geo_path)
+    geo = load_geometry(args.geo_path)
+    # Apply overrides
+    if args.firstPos is not None:
+        delta = args.firstPos - geo['firstPos']
+        geo['firstPos'] = args.firstPos
+        geo['zMin'] += delta
+        geo['zMax'] += delta
+        for d in geo['detectors']:
+            d['z_near']   += delta
+            d['z_center'] += delta
+            d['z']        += delta
+        print(f"  Overriding firstPos to {args.firstPos} mm")
+    if args.recoilPos is not None:
+        geo['recoilPos'] = args.recoilPos
+        print(f"  Overriding recoilPos to {args.recoilPos} mm")
+    geo_path, out_path = args.geo_path, args.out_path
     with open(out_path, "w") as f:
         json.dump(geo, f, indent=2)
 

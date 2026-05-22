@@ -154,29 +154,52 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_json({})
 
         elif self.path == '/api/config':
-            # Read detectorGeo.txt + reaction.dat from digios working dir
+            # Read digios files, update helios_geometry.json + helios_reaction.json, return data
             result = {'ok': True, 'errors': []}
+
+            # 1. Read + save helios_geometry.json
             if os.path.exists(DETECTOR_GEO):
                 try:
                     result['detGeo'] = parse_detgeo(DETECTOR_GEO)
+                    # Save geometry JSON
+                    r = subprocess.run(
+                        [sys.executable, BUILD_GEO_PY, DETECTOR_GEO, GEO_JSON],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if r.returncode != 0:
+                        result['errors'].append(f'rebuild_geo: {r.stderr.strip()}')
                 except Exception as e:
                     result['errors'].append(f'detectorGeo: {e}')
             else:
                 result['errors'].append(f'detectorGeo.txt not found at {DETECTOR_GEO}')
 
-            if os.path.exists(REACTION_DAT):
-                try:
-                    result['reaction'] = parse_reaction(REACTION_DAT)
-                except Exception as e:
-                    result['errors'].append(f'reaction.dat: {e}')
-            else:
-                result['errors'].append(f'reaction.dat not found at {REACTION_DAT}')
-
+            # 2. Read reactionConfig + run build_reaction.py -> save helios_reaction.json
             if os.path.exists(REACTION_CFG):
                 try:
-                    result['reactionConfig'] = parse_reaction_config(REACTION_CFG)
+                    rc = parse_reaction_config(REACTION_CFG)
+                    result['reactionConfig'] = rc
+                    # Save to helios_reaction.json
+                    rxData = {
+                        'beam_A': rc.get('beam_A'), 'beam_Z': rc.get('beam_Z'),
+                        'target_A': rc.get('target_A'), 'target_Z': rc.get('target_Z'),
+                        'recoil_light_A': rc.get('recoil_light_A'), 'recoil_light_Z': rc.get('recoil_light_Z'),
+                        'beam_energy_MeVu': rc.get('beam_energy_MeVu'),
+                        'Bfield': result['detGeo'].get('Bfield', -3.0) if 'detGeo' in result else -3.0,
+                    }
+                    with open(HELIOS_REACTION_JSON, 'w') as f:
+                        import json as _json; _json.dump(rxData, f, indent=2)
+                    # Run build_reaction.py
+                    r2 = subprocess.run(
+                        [sys.executable, BUILD_REACTION_PY, HELIOS_REACTION_JSON],
+                        capture_output=True, text=True, timeout=15
+                    )
+                    if r2.returncode == 0:
+                        with open(HELIOS_REACTION_JSON) as f:
+                            result['reaction'] = json.load(f)
+                    else:
+                        result['errors'].append(f'build_reaction: {r2.stderr.strip()}')
                 except Exception as e:
-                    result['errors'].append(f'reactionConfig.txt: {e}')
+                    result['errors'].append(f'reactionConfig: {e}')
             else:
                 result['errors'].append(f'reactionConfig.txt not found at {REACTION_CFG}')
 
@@ -223,7 +246,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     self.send_json({'ok': False, 'error': str(e)}, 500)
 
         elif self.path == '/api/reaction_config':
-            # Read helios_reaction.json
+            # GET: read helios_reaction.json
             if os.path.exists(HELIOS_REACTION_JSON):
                 try:
                     with open(HELIOS_REACTION_JSON) as f:
@@ -235,7 +258,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({'ok': False, 'error': 'helios_reaction.json not found'}, 404)
 
         elif self.path == '/api/build_reaction':
-            # Run build_reaction.py to compute kinematics from helios_reaction.json
+            # GET: run build_reaction.py using existing helios_reaction.json
             try:
                 python = sys.executable
                 r = subprocess.run(
@@ -243,7 +266,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     capture_output=True, text=True, timeout=15
                 )
                 if r.returncode == 0:
-                    # Return updated reaction JSON
                     with open(HELIOS_REACTION_JSON) as f:
                         data = json.load(f)
                     self.send_json({'ok': True, 'output': r.stdout.strip(), 'reaction': data})
@@ -252,14 +274,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 self.send_json({'ok': False, 'error': str(e)}, 500)
 
-        elif self.path == '/api/rebuild_geo':
-            # Regenerate helios_geometry.json from current detectorGeo.txt
+        elif self.path.startswith('/api/rebuild_geo'):
+            # Regenerate helios_geometry.json from detectorGeo.txt
+            # Optional query params: firstPos, recoilPos passed as CLI args to build_geometry.py
+            from urllib.parse import urlparse, parse_qs
+            params = parse_qs(urlparse(self.path).query)
             try:
-                python = sys.executable
-                r = subprocess.run(
-                    [python, BUILD_GEO_PY, DETECTOR_GEO, GEO_JSON],
-                    capture_output=True, text=True, timeout=10
-                )
+                cmd = [sys.executable, BUILD_GEO_PY, DETECTOR_GEO, GEO_JSON]
+                if 'firstPos' in params:
+                    cmd += ['--firstPos', params['firstPos'][0]]
+                if 'recoilPos' in params:
+                    cmd += ['--recoilPos', params['recoilPos'][0]]
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
                 if r.returncode == 0:
                     self.send_json({'ok': True, 'output': r.stdout.strip()})
                 else:
@@ -274,12 +300,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(length)
         if self.path == '/api/reaction_config':
-            # Save helios_reaction.json
+            # Save helios_reaction.json only (no build)
             try:
                 data = json.loads(body)
                 with open(HELIOS_REACTION_JSON, 'w') as f:
                     json.dump(data, f, indent=2)
                 self.send_json({'ok': True})
+            except Exception as e:
+                self.send_json({'ok': False, 'error': str(e)}, 500)
+        elif self.path == '/api/build_reaction':
+            # POST: save body to helios_reaction.json + run build_reaction.py in one step
+            try:
+                data = json.loads(body)
+                with open(HELIOS_REACTION_JSON, 'w') as f:
+                    json.dump(data, f, indent=2)
+                python = sys.executable
+                r = subprocess.run(
+                    [python, BUILD_REACTION_PY, HELIOS_REACTION_JSON],
+                    capture_output=True, text=True, timeout=15
+                )
+                if r.returncode == 0:
+                    with open(HELIOS_REACTION_JSON) as f:
+                        result = json.load(f)
+                    self.send_json({'ok': True, 'output': r.stdout.strip(), 'reaction': result})
+                else:
+                    self.send_json({'ok': False, 'error': r.stderr.strip() or r.stdout.strip()}, 500)
             except Exception as e:
                 self.send_json({'ok': False, 'error': str(e)}, 500)
         else:

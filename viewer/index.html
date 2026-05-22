@@ -92,8 +92,8 @@
     <div class="sep"></div>
     <div class="control"><label>Magnet Z offset</label><span id="target-z-val" style="color:#ffa657;min-width:48px;text-align:right;">0 mm</span></div>
     <div class="control" style="flex-direction:column;align-items:stretch;gap:4px;">
-      <input type="range" id="target-z" min="-400" max="400" value="0" step="5" style="width:100%;">
-      <div style="display:flex;justify-content:space-between;font-size:10px;color:#484f58;"><span>-400mm</span><span>0</span><span>+400mm</span></div>
+      <input type="range" id="target-z" min="-500" max="500" value="0" step="5" style="width:100%;">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#484f58;"><span>-500mm</span><span>0</span><span>+500mm</span></div>
       <div style="display:flex;justify-content:space-between;font-size:10px;color:#484f58;margin-top:2px;"><span>← upstream</span><span>downstream →</span></div>
     </div>
     <div class="sep"></div>
@@ -121,7 +121,7 @@
       <div class="control"><label>φ_CM (deg)</label><input type="number" id="phi-cm" value="30" min="0" max="360" step="1"></div>
       <div class="control"><label>Ex (MeV)</label><input type="number" id="ex-mev" value="0" min="0" max="10" step="0.1"></div>
       <div class="control"><label>Anim speed</label><input type="range" id="anim-speed" min="1" max="20" value="8"></div>
-      <div class="control"><label>Random θ,φ</label><input type="checkbox" id="random-angles" checked style="margin-left:8px;"></div>
+      <div class="control" style="display:flex;align-items:center;gap:4px;"><label>Random θ,φ</label><input type="checkbox" id="random-angles" checked style="margin-left:4px;"><span style="color:#8b949e;font-size:10px;margin-left:6px;">max</span><input type="number" id="max-theta" value="60" min="1" max="180" step="1" style="width:44px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:1px 3px;font-size:11px;"><span style="color:#8b949e;font-size:10px;">°</span></div>
       <div class="control"><label>Stop on support</label><input type="checkbox" id="stop-on-support" checked style="margin-left:8px;"></div>
       <div class="control"><label>Rate /sec</label><input type="range" id="gen-rate" min="1" max="10" value="3" step="1"><span id="gen-rate-val" style="color:#ffa657;">3/s</span></div>
       <div class="control"><label>Keep N</label><input type="range" id="keep-n" min="1" max="20" value="5" step="1"><span id="keep-n-val" style="color:#ffa657;">5</span></div>
@@ -133,36 +133,36 @@
     <!-- Geometry column (second) -->
     <div style="min-width:140px;">
       <div style="color:#ffa657;font-weight:bold;margin-bottom:8px;font-size:13px;">⚙ Geometry</div>
-      <div class="control"><label>Array pos (mm)</label><input type="number" id="array-pos" value="-121" min="-600" max="600" step="1" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
-      <div class="control"><label>RDT pos (mm)</label><input type="number" id="rdt-pos" value="1000" min="100" max="3000" step="10" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
+      <div class="control"><label>Array pos (mm) </label><input type="number" id="array-pos" value="-121" min="-600" max="600" step="1" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
+      <div class="control"><label>RDT pos (mm) </label><input type="number" id="rdt-pos" value="1000" min="100" max="3000" step="10" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
       <button id="load-config-btn" style="width:100%;margin-top:6px;padding:4px;background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">↓ Load digios</button>
-      <button id="apply-geo-btn" style="width:100%;margin-top:4px;padding:4px;background:#21262d;border:1px solid #3fb950;color:#3fb950;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">▶ Apply</button>
+      <button id="apply-geo-btn" style="width:100%;margin-top:4px;padding:4px;background:#21262d;border:1px solid #3fb950;color:#3fb950;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">▶ Reposition</button>
     </div>
 
     <!-- Reaction column -->
-    <div style="min-width:150px;">
+    <div style="min-width:140px;">
       <div style="color:#79c0ff;font-weight:bold;margin-bottom:8px;font-size:13px;">⚛ Reaction</div>
       <div style="display:flex;flex-direction:column;gap:4px;">
         <div style="display:flex;align-items:center;gap:6px;">
-          <span style="color:#8b949e;width:52px;font-size:11px;">Beam</span>
+          <span style="color:#8b949e;width:56px;font-size:11px;">Beam</span>
           <input type="text" id="rx-beam-sym" value="32Si" placeholder="e.g. 32Si"
             style="width:70px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 5px;font-family:monospace;"
             onkeydown="if(event.key==='Enter')resolveSymbol('beam')">
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
-          <span style="color:#8b949e;width:52px;font-size:11px;">Target</span>
+          <span style="color:#8b949e;width:56px;font-size:11px;">Target</span>
           <input type="text" id="rx-tgt-sym" value="2H" placeholder="e.g. d"
             style="width:70px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 5px;font-family:monospace;"
             onkeydown="if(event.key==='Enter')resolveSymbol('target')">
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
-          <span style="color:#8b949e;width:52px;font-size:11px;">Recoil b</span>
+          <span style="color:#8b949e;width:56px;font-size:11px;">Recoil b</span>
           <input type="text" id="rx-rec-sym" value="1H" placeholder="e.g. p"
             style="width:70px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 5px;font-family:monospace;"
             onkeydown="if(event.key==='Enter')resolveSymbol('recoil')">
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
-          <span style="color:#8b949e;width:52px;font-size:11px;">E MeV/u</span>
+          <span style="color:#8b949e;width:56px;font-size:11px;">E MeV/u</span>
           <input type="number" id="rx-energy" value="8.8" min="0.1" max="100" step="0.1"
             style="width:70px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
         </div>
@@ -203,6 +203,7 @@
   </div>
 </div>
 
+<script src="helios_common.js"></script>
 <script src="three.min.js" onload="document.getElementById('loading-msg').textContent='Loading controls...';document.getElementById('loading-bar').style.width='40%';"></script>
 <script src="OrbitControls.js" onload="document.getElementById('loading-msg').textContent='Initializing scene...';document.getElementById('loading-bar').style.width='70%';"></script>
 <script>
@@ -436,6 +437,7 @@ let movableGroup = null; // magnet bore slides along Z
 let beamArrowGroup = null;
 let targetGroup = null;
 let tubeMeshes = []; // support tube panels for opacity control
+let tubeGroup = null; // support tube group (panels + wireframe)
 
 const ROW_COLORS = [0x58a6ff,0xff7b72,0x79c0ff,0xffa657]; // 4 sides
 const COL_COLORS = [0xff4444,0xff8c00,0xffd700,0x44ff88,0x44aaff,0xcc44ff]; // 6 z-positions
@@ -451,6 +453,33 @@ function getDetColor(det) {
 function updateColors() {
   detMeshes.forEach((m, i) => { m.material.color = getDetColor(GEO.detectors[i]); });
   updateLegend();
+}
+
+function autoPositionMagnet(geo) {
+  // Position magnet to cover the array + buffer, clamp to slider range
+  const magnetHalf = 750;
+  const buffer = 100;
+  const nDet = geo.nDet || 6;
+  const detLength = geo.length || 50;
+  const arrayLen = nDet * detLength + (nDet-1) * 5;
+  const fp = geo.firstPos;
+  const arrayFarZ = fp < 0 ? fp - arrayLen : fp + arrayLen;
+  let mz = fp < 0 ? arrayFarZ - buffer + magnetHalf : arrayFarZ + buffer - magnetHalf;
+  mz = Math.max(-400, Math.min(400, Math.round(mz)));
+  document.getElementById('target-z').value = mz;
+  document.getElementById('target-z-val').textContent = (mz >= 0 ? '+' : '') + mz + ' mm';
+  if (movableGroup) movableGroup.position.z = mz;
+  buildBeamArrow();
+  // Reposition camera to array center
+  if (typeof controls !== 'undefined' && typeof camera !== 'undefined') {
+    const zMin = geo.zMin || fp - arrayLen;
+    const zMax = geo.zMax || fp;
+    const cz = (zMin + zMax) / 2;
+    const vd = Math.max(300, Math.abs(zMax - zMin) * 1.5);
+    controls.target.set(0, 0, cz);
+    camera.position.set(vd * 0.4, vd * 0.3, cz + vd);
+    controls.update();
+  }
 }
 
 function buildTarget() {
@@ -488,17 +517,9 @@ function buildTarget() {
 }
 
 // Element symbols for auto label generation
-const ELEMENT_SYMBOLS = [
-  'n','H','He','Li','Be','B','C','N','O','F','Ne',
-  'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
-  'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',
-  'Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr',
-  'Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn',
-  'Sb','Te','I','Xe','Cs','Ba','La','Ce','Pr','Nd',
-];
+// ELEMENT_SYMBOLS defined in helios_common.js
 function azToLabel(A, Z) {
-  const sym = ELEMENT_SYMBOLS[Z] || `Z${Z}`;
-  return `${A}${sym}`;
+  return heliosNuclideName(A, Z);
 }
 function getLabelFromRxField(aFieldId, zFieldId, fallback) {
   const aEl = document.getElementById(aFieldId);
@@ -510,6 +531,7 @@ function getLabelFromRxField(aFieldId, zFieldId, fallback) {
 }
 
 function makeNuclideLabel(rawLabel, colorHex) {
+  return heliosMakeNuclideCanvas(rawLabel, colorHex);
   // Parse "32Si" -> A="32", sym="Si"; render as superscript A + symbol
   const match = rawLabel.match(/^(\d+)([A-Za-z]+)$/);
   const canvas = document.createElement('canvas');
@@ -651,7 +673,7 @@ function buildScene() {
   const tubeLen  = g.zMax - g.zMin;  // 340 mm
   const tubeCenterZ = (g.zMin + g.zMax) / 2; // -291 mm
   tubeMeshes = [];
-  const tubeGroup = new THREE.Group();
+  tubeGroup = new THREE.Group();
   [
     { tx:  tubeHalf, ty: 0,          w: tubeWall,   h: tubeHalf*2 },
     { tx: -tubeHalf, ty: 0,          w: tubeWall,   h: tubeHalf*2 },
@@ -879,8 +901,20 @@ function checkSiHit(pt, geo) {
 
 // Check if a point hits the recoil detector
 function checkRecoilHit(pt, geo) {
-  if (Math.abs(pt.z - geo.recoilPos) > 5) return false;
+  if (Math.abs(pt.z - geo.recoilPos) > 8) return false; // ~2x step size at 200 steps/orbit
   const r = Math.sqrt(pt.x*pt.x + pt.y*pt.y);
+  return r >= geo.recoilInner && r <= geo.recoilOuter;
+}
+
+function checkRecoilCrossing(ptPrev, ptCurr, geo) {
+  // Check if trajectory crossed the RDT z-plane between two consecutive points
+  const rPos = geo.recoilPos;
+  if (!((ptPrev.z <= rPos && ptCurr.z >= rPos) || (ptPrev.z >= rPos && ptCurr.z <= rPos))) return false;
+  // Interpolate x,y at z=recoilPos
+  const frac = (rPos - ptPrev.z) / (ptCurr.z - ptPrev.z);
+  const xi = ptPrev.x + frac * (ptCurr.x - ptPrev.x);
+  const yi = ptPrev.y + frac * (ptCurr.y - ptPrev.y);
+  const r = Math.sqrt(xi*xi + yi*yi);
   return r >= geo.recoilInner && r <= geo.recoilOuter;
 }
 
@@ -889,7 +923,7 @@ function generateEvent(autoMode = false) {
   // Both manual and auto accumulate up to keepN tracks; Clear button resets
 
   const useRandom = document.getElementById('random-angles').checked;
-  const thetaCM = useRandom ? Math.random() * 170 + 5 : parseFloat(document.getElementById('theta-cm').value);
+  const thetaCM = useRandom ? (Math.random() * (parseFloat(document.getElementById('max-theta')?.value||60))) + 1 : parseFloat(document.getElementById('theta-cm').value);
   const phiCM   = useRandom ? Math.random() * 360     : parseFloat(document.getElementById('phi-cm').value);
   const Ex      = useRandom ? Math.random() * 5 : parseFloat(document.getElementById('ex-mev').value);
 
@@ -900,7 +934,7 @@ function generateEvent(autoMode = false) {
     const tTotal = zLimit / track.vz;
     if (!isFinite(tTotal) || tTotal <= 0) return 800;
     const T_cyc = Math.abs(2 * Math.PI / track.omega);
-    const dt_step = T_cyc / 100; // 100 steps per orbit
+    const dt_step = T_cyc / 200; // 200 steps per orbit
     return Math.min(10000, Math.max(200, Math.ceil(tTotal / dt_step)));
   }
 
@@ -924,7 +958,7 @@ function generateEvent(autoMode = false) {
   let thetaCM_used = thetaCM, phiCM_used = phiCM;
   let attempts = 0;
   while (attempts < 50) {
-    thetaCM_used = useRandom ? Math.random()*170+5 : thetaCM;
+    thetaCM_used = useRandom ? (Math.random()*(parseFloat(document.getElementById('max-theta')?.value||60))+1) : thetaCM;
     phiCM_used   = useRandom ? Math.random()*360   : phiCM;
     const t = computeTrack(REACTION.mass_b, REACTION.charge_b, thetaCM_used, phiCM_used, Ex, Bfield, true);
     if (!t) { attempts++; continue; }
@@ -957,9 +991,9 @@ function generateEvent(autoMode = false) {
   const nLight = adaptiveN(trackB_light, lightZLimit);
   const ptsLight = sampleHelixPoints(trackB_light, lightZLimit, nLight);
 
-  // Heavy recoil: track to RDT + 100 mm always; hit/miss determined in trimAtHit
-  const heavyZMax = GEO.recoilPos + 100;
-  const ptsHeavy = sampleHelixPointsZ(trackB_heavy, heavyZMax, 300);
+  // Heavy recoil: track to max(RDT+100, magnet downstream edge)
+  const heavyZMax = Math.max(GEO.recoilPos + 100, zMagMax + 100);
+  const ptsHeavy = sampleHelixPointsZ(trackB_heavy, heavyZMax, 600); // ~2mm steps
 
   // Debug info
   const dbg = `vz_b=${trackB_light.vz.toFixed(1)} zLim=${lightZLimit.toFixed(0)} N=${nLight} pts=${ptsLight.length} | vz_B=${trackB_heavy.vz.toFixed(1)} zMax=${heavyZMax.toFixed(0)} pts=${ptsHeavy.length}`;
@@ -984,7 +1018,13 @@ function generateEvent(autoMode = false) {
         if (hit) return { pts: pts.slice(0, i+1), hitDet: hit, hitRecoil: false, hitTube: false, hitBore: false };
         // Stop on support tube hit (optional)
         if (stopOnSupport && checkTubeHit(pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: false, hitTube: true, hitBore: false };
+        // Downstream array: light recoil can also hit RDT (use crossing check)
+        const prevPtL = i > 0 ? pts[i-1] : null;
+        if (GEO.firstPos > 0 && prevPtL && checkRecoilCrossing(prevPtL, pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: true, hitTube: false, hitBore: false };
+        if (GEO.firstPos > 0 && checkRecoilHit(pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: true, hitTube: false, hitBore: false };
       } else {
+        const prevPtH = i > 0 ? pts[i-1] : null;
+        if (prevPtH && checkRecoilCrossing(prevPtH, pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: true, hitTube: false, hitBore: false };
         if (checkRecoilHit(pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: true, hitTube: false, hitBore: false };
         if (stopOnSupport && checkTubeHit(pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: false, hitTube: true, hitBore: false };
       }
@@ -1250,8 +1290,8 @@ function animate() {
 // ═══════════════════════════════════════════════════════════════════
 // Rebuild labels whenever reaction A/Z fields change
 // Symbol shorthand resolver for reaction inputs
-const RX_SHORTHAND = {p:'1H',n:'1n',d:'2H',D:'2H',t:'3H',T:'3H',h:'3He',H:'3He',a:'4He',A:'4He',alpha:'4He'};
-const RX_EL = ['n','H','He','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn','Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr','Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn'];
+const RX_SHORTHAND = HELIOS_SHORTHAND;
+const RX_EL = ELEMENT_SYMBOLS;
 
 function resolveSymbol(role) {
   const prefix = role==='recoil' ? 'rx-rec' : role==='beam' ? 'rx-beam' : 'rx-tgt';
@@ -1287,7 +1327,8 @@ async function loadReactionJson() {
   } catch(e) { /* standalone mode — no server or file */ }
 }
 
-function azToSym(A, Z) {
+const azToSym = heliosNuclideName;
+function _azToSym_unused(A, Z) {
   return A + (RX_EL[Z] || ('Z'+Z));
 }
 function applyReactionConfig(rx) {
@@ -1338,13 +1379,11 @@ document.getElementById('rx-build-btn').addEventListener('click', async () => {
     Bfield:           GEO ? GEO.Bfield : -3.0,
   };
   try {
-    // Save to helios_reaction.json
-    await fetch('/api/reaction_config', {
+    // POST rxData directly to /api/build_reaction — saves + builds in one step
+    const r = await fetch('/api/build_reaction', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify(rxData)
     });
-    // Run build_reaction.py
-    const r = await fetch('/api/build_reaction');
     const d = await r.json();
     if (d.ok) {
       applyReactionConfig(d.reaction);
@@ -1379,142 +1418,143 @@ document.getElementById('load-config-btn').addEventListener('click', async () =>
   const status = document.getElementById('config-status');
   btn.disabled = true; btn.textContent = '⟳ Loading...';
   try {
-    const r = await fetch('/api/config');
-    const d = await r.json();
-    if (d.errors && d.errors.length) {
-      status.textContent = '⚠ ' + d.errors.join(' | ');
-      status.style.color = '#ff7b72';
-    }
+    // 1) Fetch config from digios
+    const resp = await fetch('/api/config');
+    const d = await resp.json();
+
+    // Update panel inputs from detectorGeo.txt
     if (d.detGeo) {
-      document.getElementById('array-pos').value = d.detGeo.firstPos;
-      document.getElementById('rdt-pos').value = d.detGeo.recoilPos;
-      const bf = d.detGeo.Bfield;
-      document.getElementById('bfield').value = bf;
-      document.getElementById('bfield-val').value = parseFloat(document.getElementById('bfield').value).toFixed(1);
-      if (GEO) GEO.Bfield = bf;
-      // Update B-field display in geo-info
-      status.textContent = `Loaded: firstPos=${d.detGeo.firstPos}mm  RDT=${d.detGeo.recoilPos}mm  B=${d.detGeo.Bfield}T  bore=${d.detGeo.bore}mm`;
-      status.style.color = '#3fb950';
+      document.getElementById('array-pos').value  = d.detGeo.firstPos;
+      document.getElementById('rdt-pos').value    = d.detGeo.recoilPos;
+      document.getElementById('bfield').value     = d.detGeo.Bfield;
+      document.getElementById('bfield-val').value = parseFloat(d.detGeo.Bfield).toFixed(1);
+      if (GEO) GEO.Bfield = d.detGeo.Bfield;
     }
+
+    // Update reaction panel inputs from reactionConfig.txt
     if (d.reactionConfig) {
-      applyReactionConfig({
-        beam_A: d.reactionConfig.beam_A, beam_Z: d.reactionConfig.beam_Z,
-        target_A: d.reactionConfig.target_A, target_Z: d.reactionConfig.target_Z,
-        recoil_light_A: d.reactionConfig.recoil_light_A, recoil_light_Z: d.reactionConfig.recoil_light_Z,
-        beam_energy_MeVu: d.reactionConfig.beam_energy_MeVu,
-        beam_label: d.reactionConfig.beam_label, target_label: d.reactionConfig.target_label,
-      });
-    }
-    if (d.reactionConfig && d.reactionConfig.beam_label) {
+      const rc = d.reactionConfig;
+      document.getElementById('rx-beam-A').value = rc.beam_A;
+      document.getElementById('rx-beam-Z').value = rc.beam_Z;
+      document.getElementById('rx-tgt-A').value  = rc.target_A;
+      document.getElementById('rx-tgt-Z').value  = rc.target_Z;
+      document.getElementById('rx-rec-A').value  = rc.recoil_light_A;
+      document.getElementById('rx-rec-Z').value  = rc.recoil_light_Z;
+      document.getElementById('rx-energy').value = rc.beam_energy_MeVu;
+      const bsym = document.getElementById('rx-beam-sym');
+      const tsym = document.getElementById('rx-tgt-sym');
+      const rsym = document.getElementById('rx-rec-sym');
+      if (bsym && rc.beam_label)         bsym.value = rc.beam_label;
+      if (tsym && rc.target_label)       tsym.value = rc.target_label;
+      if (rsym && rc.recoil_light_label) rsym.value = rc.recoil_light_label;
       buildBeamArrow();
       buildTarget();
     }
-    if (d.reactionConfig) {
-      // Save reactionConfig values to helios_reaction.json, then rebuild kinematics
-      const rc = d.reactionConfig;
-      const rxData = {
-        beam_A: rc.beam_A, beam_Z: rc.beam_Z,
-        target_A: rc.target_A, target_Z: rc.target_Z,
-        recoil_light_A: rc.recoil_light_A, recoil_light_Z: rc.recoil_light_Z,
-        beam_energy_MeVu: rc.beam_energy_MeVu,
-        Bfield: d.detGeo ? d.detGeo.Bfield : -3.0,
-      };
-      btn.textContent = '⟳ Computing masses...';
-      await fetch('/api/reaction_config', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(rxData)
+
+    // 2) Move detectors according to helios_geometry.json positions
+    if (d.detGeo && GEO) {
+      const newFP = d.detGeo.firstPos;
+      const newRP = d.detGeo.recoilPos;
+      const delta = newFP - GEO.firstPos;
+
+      // Shift detector meshes
+      detMeshes.forEach(m => { m.position.z += delta; });
+      // Shift support tube group
+      if (tubeGroup) tubeGroup.position.z += delta;
+      // Move recoil ring
+      if (recoilGroup) recoilGroup.children.forEach(child => {
+        if (child.geometry) child.position.z = newRP;
       });
-      const rbCtrl = new AbortController();
-      const rbTimeout = setTimeout(() => rbCtrl.abort(), 15000);
-      const rb = await fetch('/api/build_reaction', { signal: rbCtrl.signal });
-      clearTimeout(rbTimeout);
-      const rbd = await rb.json();
-      if (rbd.ok && rbd.reaction) {
-        const rx = rbd.reaction;
-        REACTION.mass_b   = rx.mass_b;
-        REACTION.charge_b = rx.charge_b || 1;
-        REACTION.betaCM   = rx.betaCM;
-        REACTION.Ecm      = rx.Ecm;
-        REACTION.mass_B   = rx.mass_B;
-        REACTION.charge_B = rx.charge_B || (parseInt(rc.beam_Z)+parseInt(rc.target_Z)-parseInt(rc.recoil_light_Z));
-        status.textContent += `  Q=${rx.Q ? rx.Q.toFixed(3) : '?'} MeV | mb=${rx.mass_b ? rx.mass_b.toFixed(0) : '?'} mB=${rx.mass_B ? rx.mass_B.toFixed(0) : '?'} MeV/c²`;
-        clearTracks();
-      }
+
+      // Update GEO in memory
+      GEO.detectors.forEach(det => { det.z_near += delta; det.z_center += delta; det.z += delta; });
+      GEO.firstPos = newFP;
+      GEO.zMin += delta; GEO.zMax += delta;
+      GEO._tubeZMin = GEO.zMin; GEO._tubeZMax = GEO.zMax;
+      GEO.recoilPos = newRP;
+
+      // Auto-position magnet and camera
+      autoPositionMagnet(GEO);
+      clearTracks();
     }
+
+    const errStr = d.errors && d.errors.length ? ' | ⚠ ' + d.errors.join(', ') : '';
+    status.textContent = d.detGeo
+      ? 'Loaded: firstPos=' + d.detGeo.firstPos + 'mm  B=' + d.detGeo.Bfield + 'T' + errStr
+      : 'No detGeo' + errStr;
+    status.style.color = '#3fb950';
   } catch(e) {
-    status.textContent = 'Load failed: ' + e;
+    status.textContent = 'Load failed: ' + e.message;
     status.style.color = '#ff7b72';
   } finally {
     btn.disabled = false; btn.textContent = '↓ Load digios';
   }
 });
 
-document.getElementById('apply-geo-btn').addEventListener('click', async () => {
+async function applyGeometry() {
   if (!GEO) return;
   const newFirstPos = parseFloat(document.getElementById('array-pos').value);
   const newRDTPos   = parseFloat(document.getElementById('rdt-pos').value);
   const status = document.getElementById('config-status');
   const btn = document.getElementById('apply-geo-btn');
-  btn.disabled = true;
+  await _doApplyGeometry(newFirstPos, newRDTPos, status, btn);
+}
 
-  // Rebuild geometry JSON via server, then reload
+async function _doApplyGeometry(newFirstPos, newRDTPos, status, btn) {
+  // First rebuild helios_geometry.json with new positions
+  if (status) { status.textContent = 'Rebuilding geometry...'; status.style.color = '#8b949e'; }
   try {
-    // First update GEO values directly for immediate effect
-    // Shift all detectors by delta
-    const delta = newFirstPos - GEO.firstPos;
-    GEO.detectors.forEach(d => {
-      d.z_near   += delta;
-      d.z_center += delta;
-      d.z        += delta;
-    });
-    GEO.firstPos = newFirstPos;
-    GEO.zMin += delta;
-    GEO.zMax += delta;
-    GEO._tubeZMin += delta;
-    GEO._tubeZMax += delta;
+    const r = await fetch(`/api/rebuild_geo?firstPos=${newFirstPos}&recoilPos=${newRDTPos}`);
+    const d = await r.json();
+    if (!d.ok) { if(status){ status.textContent = 'Rebuild failed: ' + d.error; status.style.color = '#ff7b72'; } if(btn) btn.disabled=false; return; }
+  } catch(e) {
+    if(status){ status.textContent = 'Rebuild error: ' + e.message; status.style.color = '#ff7b72'; } if(btn) btn.disabled=false; return;
+  }
 
-    // Update RDT
+  // Shift all scene objects in-place — no rebuild needed
+  try {
+    const delta = newFirstPos - GEO.firstPos;
+
+    // 1. Shift detector meshes
+    detMeshes.forEach(mesh => {
+      mesh.position.z += delta;
+    });
+
+    // 2. Shift entire support tube group (panels + wireframe) at once
+    if (tubeGroup) tubeGroup.position.z += delta;
+
+    // 4. Move recoil ring
+    if (recoilGroup) {
+      recoilGroup.children.forEach(child => {
+        if (child.geometry && child.geometry.type === 'RingGeometry') {
+          child.position.z = newRDTPos;
+        }
+      });
+    }
+
+    // 5. Update GEO
+    GEO.detectors.forEach(d => { d.z_near += delta; d.z_center += delta; d.z += delta; });
+    GEO.firstPos = newFirstPos;
+    GEO.zMin += delta; GEO.zMax += delta;
+    GEO._tubeZMin = GEO.zMin; GEO._tubeZMax = GEO.zMax;
     GEO.recoilPos = newRDTPos;
 
-    // Rebuild scene with new geometry
-    // Remove old detector meshes + tube + recoil
-    detMeshes.forEach(m => scene.remove(m));
-    detMeshes = [];
-    scene.remove(recoilGroup);
-    // Remove tube (not tracked — rebuild everything)
-    // Simplest: reload page geometry from rebuilt JSON
-    const r2 = await fetch('/api/rebuild_geo');
-    const rb = await r2.json();
-    if (rb.ok) {
-      status.textContent = 'Rebuilt. Reloading geometry...';
-      // Reload geometry JSON
-      const geoR = await fetch('helios_geometry.json?t=' + Date.now());
-      GEO = await geoR.json();
-      GEO._tubeHalf = 10.5;
-      GEO._tubeZMin = GEO.zMin;
-      GEO._tubeZMax = GEO.zMax;
-      GEO.recoilPos = newRDTPos;
-      // Rebuild scene
-      clearTracks();
-      while(scene.children.length > 0) scene.remove(scene.children[0]);
-      scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-      const d1 = new THREE.DirectionalLight(0xffffff, 0.8); d1.position.set(200,300,200); scene.add(d1);
-      const d2 = new THREE.DirectionalLight(0x88aaff, 0.3); d2.position.set(-200,-100,-200); scene.add(d2);
-      trackGroup = new THREE.Group(); scene.add(trackGroup);
-      movableGroup = null; boreGroup = null; recoilGroup = null; axisGroup = null;
-      buildScene();
-      status.textContent = `Applied: firstPos=${newFirstPos}mm  RDT=${newRDTPos}mm`;
-      status.style.color = '#3fb950';
-    } else {
-      status.textContent = 'Rebuild failed: ' + rb.error;
-      status.style.color = '#ff7b72';
-    }
+    // 6. JSON on disk already updated above by /api/rebuild_geo
+
+    // 7. Auto-position magnet and camera
+    autoPositionMagnet(GEO);
+    clearTracks();
+    status.textContent = `Repositioned: firstPos=${newFirstPos}mm  RDT=${newRDTPos}mm`;
+    status.style.color = '#3fb950';
   } catch(e) {
     status.textContent = 'Apply failed: ' + e;
     status.style.color = '#ff7b72';
   }
   btn.disabled = false;
-});
+  btn.textContent = '▶ Reposition';
+}
+
+document.getElementById('apply-geo-btn').addEventListener('click', applyGeometry);
 
 // ═══════════════════════════════════════════════════════════════════
 // INIT
@@ -1528,8 +1568,17 @@ fetch('helios_geometry.json')
     setLoadingProgress(95, 'Building scene...');
     GEO = data;
     buildScene();
+    // Sync geometry panel from loaded JSON
     document.getElementById('bfield').value = data.Bfield;
-    document.getElementById('bfield-val').value = parseFloat(document.getElementById('bfield').value).toFixed(1);
+    document.getElementById('bfield-val').value = parseFloat(data.Bfield).toFixed(1);
+    if (data.firstPos !== undefined) {
+      document.getElementById('array-pos').value = data.firstPos;
+    }
+    if (data.recoilPos !== undefined) {
+      document.getElementById('rdt-pos').value = data.recoilPos;
+    }
+    // Auto-position magnet to cover array + camera
+    if (data.firstPos !== undefined) autoPositionMagnet(data);
     document.getElementById('status').textContent = `☀ ${data.nDet*data.mDet} dets loaded | port 8765`;
     setLoadingProgress(100, 'Ready.');
     hideLoading();

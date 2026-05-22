@@ -299,6 +299,7 @@
   </div>
 </div>
 
+<script src="helios_common.js"></script>
 <script src="plotly.min.js"></script>
 <script>
 // =====================================================================
@@ -318,7 +319,7 @@ const COLORS = [
 ];
 
 // HELIOS geometry constants
-let heliosPosOffsets = [0, 58.6, 117.9, 176.8, 235.8, 294.0]; // mm
+let heliosPosOffsets = [0, 58.6, 117.9, 176.8, 235.8, 294.5]; // mm
 let nDet = 6;
 let detLen = 50; // mm
 let perpDist = 11.5; // mm
@@ -917,7 +918,7 @@ async function loadFromServerFull() {
         document.getElementById('sl-energy').value  = Math.min(30, rc.beam_energy_MeVu);
       }
 
-      // Step 2: Save reactionConfig values to helios_reaction.json
+      // Step 2+3: POST rxData to /api/build_reaction — saves + builds in one step
       const rxData = {
         beam_A: rc.beam_A, beam_Z: rc.beam_Z,
         target_A: rc.target_A, target_Z: rc.target_Z,
@@ -925,18 +926,15 @@ async function loadFromServerFull() {
         beam_energy_MeVu: rc.beam_energy_MeVu,
         Bfield: d2.detGeo ? d2.detGeo.Bfield : -3.0,
       };
-      await fetch('/api/reaction_config', {
+      const rb = await fetch('/api/build_reaction', {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify(rxData)
       });
-
-      // Step 3: Run build_reaction.py — recomputes masses from AME2020
-      const rb = await fetch('/api/build_reaction');
       const rbd = await rb.json();
       if (rbd.ok && rbd.reaction) {
         const rx = rbd.reaction;
         // Populate nucCache from freshly computed values
-        const EL_full = ['n','H','He','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn','Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr','Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn'];
+        const EL_full = ELEMENT_SYMBOLS;
         function azLabel(A, Z) { return A + (EL_full[Z] || '?'); }
         nucCache.beam   = { A: parseInt(rc.beam_A),         Z: parseInt(rc.beam_Z),         mass: rx.Ma,     name: rx.beam_label };
         nucCache.target = { A: parseInt(rc.target_A),       Z: parseInt(rc.target_Z),       mass: rx.Mt,     name: rx.target_label };
