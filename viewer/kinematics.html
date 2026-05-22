@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>HELIOS Kinematics</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#fff; color:#222; font-family:Arial,sans-serif; font-size:13px; }
+
+    #header {
+      display:flex; align-items:center; gap:16px;
+      padding:6px 14px; border-bottom:1px solid #ddd; background:#fff;
+    }
+    #header #rx-title { flex:1; font-size:13px; font-weight:bold; color:#222; }
+    #header a.back { color:#1a73e8; text-decoration:none; font-size:13px; }
+    #header a.back:hover { text-decoration:underline; }
+
+    #main { display:flex; height:calc(100vh - 38px); }
+
+    #left-panel {
+      width:300px; min-width:300px; max-width:300px;
+      background:#f5f7fa; border-right:1px solid #ddd;
+      overflow-y:auto; padding:8px; display:flex; flex-direction:column; gap:7px;
+    }
+    .section { background:#fff; border:1px solid #ddd; border-radius:3px; padding:7px 9px; }
+    .section h3 { font-size:11px; font-weight:bold; color:#555; margin-bottom:5px; text-transform:uppercase; letter-spacing:0.4px; }
+
+    .ctrl-row { display:flex; align-items:center; gap:5px; margin:3px 0; }
+    .ctrl-row label { font-size:12px; color:#555; width:112px; min-width:112px; flex-shrink:0; }
+    .ctrl-row input[type=range] { flex:1; min-width:0; }
+    .ctrl-row .spinbox { flex-shrink:0; }
+
+    input[type=text], input[type=number] {
+      background:#fff; border:1px solid #ccc; border-radius:3px;
+      padding:2px 5px; font-size:13px; font-family:Arial,sans-serif; color:#222;
+    }
+    input[type=range] {
+      flex:1; height:18px; cursor:pointer; border:none; background:transparent;
+    }
+    .spinbox { width:62px; }
+
+    button {
+      background:#fff; border:1px solid #ccc; border-radius:3px;
+      padding:3px 9px; cursor:pointer; font-size:12px;
+      font-family:Arial,sans-serif; color:#222;
+    }
+    button:hover { background:#f0f0f0; }
+
+    .nuc-row { display:flex; align-items:center; gap:5px; margin:2px 0; }
+    .nuc-lbl { font-size:12px; color:#555; min-width:46px; }
+    .nuc-inp { width:78px; }
+    .nuc-info { font-size:11px; color:#888; }
+
+    #right-area { flex:1; display:flex; flex-direction:column; min-width:0; overflow:hidden; }
+
+    #ex-area {
+      border-bottom:1px solid #ddd; padding:6px 8px;
+      background:#fff; overflow-x:auto; flex-shrink:0;
+    }
+    #ex-area-header { display:flex; align-items:center; gap:7px; margin-bottom:5px; }
+    #ex-area-header h3 { font-size:12px; font-weight:bold; color:#444; }
+
+    table#ExTable {
+      border-collapse:collapse; font-size:11px; min-width:920px;
+    }
+    table#ExTable th {
+      background:#f5f7fa; border:1px solid #ddd; padding:3px 5px;
+      font-weight:bold; color:#444; white-space:nowrap; text-align:center;
+    }
+    table#ExTable td {
+      border:1px solid #e8e8e8; padding:2px 4px; text-align:right; white-space:nowrap;
+    }
+    table#ExTable td:first-child, table#ExTable td:nth-child(2) { text-align:center; }
+    table#ExTable input[type=number] { width:70px; padding:1px 3px; font-size:11px; }
+    .calc-cell { color:#1a4f8a; background:#f7faff; font-family:monospace; font-size:11px; min-width:68px; }
+
+    #plot-area {
+      flex:1; min-height:0; overflow:hidden;
+      display:flex; flex-wrap:wrap; align-content:flex-start;
+    }
+    #plot-ez, #plot-rz {
+      min-width:450px; min-height:450px; flex:1 1 450px;
+    }
+  </style>
+</head>
+<body>
+<div id="header">
+  <span id="rx-title">HELIOS Kinematics</span>
+  <a class="back" href="index.html">&#8592; 3D View</a>
+</div>
+<div id="main">
+  <div id="left-panel">
+
+    <div class="section">
+      <h3>Reaction</h3>
+      <div class="nuc-row">
+        <span class="nuc-lbl">Beam</span>
+        <input type="text" class="nuc-inp" id="inp-beam" value="32Si"
+               onkeydown="if(event.key===&apos;Enter&apos;)lookupNuc(&apos;beam&apos;)">
+        <span class="nuc-info" id="info-beam">&mdash;</span>
+      </div>
+      <div class="nuc-row">
+        <span class="nuc-lbl">Target</span>
+        <input type="text" class="nuc-inp" id="inp-target" value="2H"
+               onkeydown="if(event.key===&apos;Enter&apos;)lookupNuc(&apos;target&apos;)">
+        <span class="nuc-info" id="info-target">&mdash;</span>
+      </div>
+      <div class="nuc-row">
+        <span class="nuc-lbl">Recoil</span>
+        <input type="text" class="nuc-inp" id="inp-light" value="1H"
+               onkeydown="if(event.key===&apos;Enter&apos;)lookupNuc(&apos;light&apos;)">
+        <span class="nuc-info" id="info-light">&mdash;</span>
+      </div>
+      <div class="ctrl-row" style="margin-top:5px;">
+        <label>Beam E (MeV/u)</label>
+        <input type="range" id="sl-energy" min="0.1" max="30" value="8.8" step="0.1"
+               style="max-width:80px;" oninput="document.getElementById('inp-energy').value=parseFloat(this.value).toFixed(1);fullUpdate();">
+        <input type="number" class="spinbox" id="inp-energy" value="8.8"
+               min="0.1" max="500" step="0.1" style="width:55px;"
+               oninput="document.getElementById('sl-energy').value=this.value;fullUpdate();">
+      </div>
+      <div class="ctrl-row">
+        <label>Beam E<sub>x</sub> (MeV)</label>
+        <input type="number" class="spinbox" id="inp-beamex" value="0.0"
+               min="0" max="50" step="0.001" oninput="scheduleUpdate()">
+      </div>
+      <div style="margin-top:6px;">
+        <button onclick="loadFromServerFull()">&#8595; Load Config</button>
+      </div>
+      <div id="rx-info" style="margin-top:8px;font-size:11px;color:#333;line-height:1.7;">
+        <div><b>Q-value:</b> <span id="rx-qval">—</span> MeV</div>
+        <div><b>Min E:</b> <span id="rx-minE">—</span> MeV/u</div>
+        <div><b>Heavy:</b> <span id="rx-heavy">—</span></div>
+        <div style="font-size:10px;color:#666;"><span id="rx-sep">—</span></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Geometry</h3>
+      <div class="ctrl-row" style="gap:12px;">
+        <label style="width:auto;min-width:auto;">System</label>
+        <label style="width:auto;min-width:auto;"><input type="radio" name="sstype" value="HELIOS" checked onchange="setSSType(this.value)"> HELIOS</label>
+        <label style="width:auto;min-width:auto;"><input type="radio" name="sstype" value="SOLARIS" onchange="setSSType(this.value)"> SOLARIS</label>
+        <label style="width:auto;min-width:auto;"><input type="radio" name="sstype" value="ISS" onchange="setSSType(this.value)"> ISS</label>
+      </div>
+      <div class="ctrl-row">
+        <label>Array pos</label>
+        <input type="range" id="sl-array" min="-800" max="800" value="-121" step="1"
+               oninput="syncSpinFromSlider(&apos;array&apos;);fastRelayout();">
+        <input type="number" class="spinbox" id="sp-array" value="-121"
+               min="-800" max="800" step="1"
+               oninput="syncSliderFromSpin(&apos;array&apos;);fastRelayout();scheduleUpdate();">
+      </div>
+      <div class="ctrl-row" style="justify-content:flex-end;">
+        <span style="font-size:10px;color:#aaa;">mm (-800..800)</span>
+      </div>
+      <div class="ctrl-row">
+        <label>RDT pos</label>
+        <input type="range" id="sl-rdt" min="100" max="3000" value="1000" step="10"
+               oninput="syncSpinFromSlider(&apos;rdt&apos;);fastRelayout();">
+        <input type="number" class="spinbox" id="sp-rdt" value="1000"
+               min="100" max="3000" step="10"
+               oninput="syncSliderFromSpin(&apos;rdt&apos;);fastRelayout();scheduleUpdate();">
+      </div>
+      <div class="ctrl-row" style="justify-content:flex-end;">
+        <span style="font-size:10px;color:#aaa;">mm (100..3000)</span>
+      </div>
+      <div class="ctrl-row">
+        <label>RDT inner (mm)</label>
+        <input type="number" class="spinbox" id="inp-rdt-inner" value="10" min="0" max="200" step="1"
+               oninput="fastRelayout();" style="width:55px;">
+      </div>
+      <div class="ctrl-row">
+        <label>RDT outer (mm)</label>
+        <input type="number" class="spinbox" id="inp-rdt-outer" value="40.2" min="1" max="500" step="0.5"
+               oninput="fastRelayout();" style="width:55px;">
+      </div>
+      <div class="ctrl-row">
+        <label>B-field (T)</label>
+        <input type="range" id="sl-bfield" min="-5" max="0" value="-3" step="0.05"
+               oninput="syncSpinFromSlider('bfield');fullUpdate();">
+        <input type="number" class="spinbox" id="sp-bfield" value="-3"
+               min="-5" max="0" step="0.05"
+               oninput="syncSliderFromSpin('bfield');fullUpdate();">
+      </div>
+      <div class="ctrl-row" style="justify-content:flex-end;">
+        <span style="font-size:10px;color:#aaa;">T (-5..0)</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Plot Settings</h3>
+      <div class="ctrl-row">
+        <label>E max (MeV)</label>
+        <input type="range" id="sl-emax" min="3" max="20" value="12" step="0.5"
+               style="flex:1;" oninput="document.getElementById('inp-emax').value=parseFloat(this.value).toFixed(1);fullUpdate();">
+        <input type="number" class="spinbox" id="inp-emax" value="12"
+               min="1" max="100" step="0.5" style="width:50px;"
+               oninput="document.getElementById('sl-emax').value=Math.min(20,Math.max(3,this.value));fullUpdate();">
+      </div>
+      <div class="ctrl-row">
+        <label>&#952;<sub>CM</sub> line (&#176;)</label>
+        <input type="range" id="sl-thline" min="0" max="90" value="0" step="0.1"
+               style="flex:1;" oninput="document.getElementById('sp-thline').value=this.value;fullUpdate();">
+        <input type="number" class="spinbox" id="sp-thline" value="0"
+               min="0" max="90" step="0.1" style="width:50px;"
+               oninput="document.getElementById('sl-thline').value=this.value;fullUpdate();">
+      </div>
+      <div class="ctrl-row">
+        <label>&#952;<sub>CM</sub> steps</label>
+        <input type="number" class="spinbox" id="inp-thsteps" value="200"
+               min="20" max="5000" step="10" oninput="scheduleUpdate()">
+      </div>
+      <div class="ctrl-row">
+        <label>Z min (mm)</label>
+        <input type="range" id="sl-zmin" min="-3000" max="0" value="-600" step="10"
+               style="flex:1;" oninput="document.getElementById('inp-zmin').value=this.value;fastRelayout();">
+        <input type="number" class="spinbox" id="inp-zmin" value="-600" min="-3000" max="0" step="10"
+               style="width:60px;" oninput="document.getElementById('sl-zmin').value=this.value;fastRelayout();">
+      </div>
+      <div class="ctrl-row">
+        <label>Z max (mm)</label>
+        <input type="range" id="sl-zmax" min="-500" max="3000" value="1000" step="10"
+               style="flex:1;" oninput="document.getElementById('inp-zmax').value=this.value;fastRelayout();">
+        <input type="number" class="spinbox" id="inp-zmax" value="1000" min="-500" max="3000" step="10"
+               style="width:60px;" oninput="document.getElementById('sl-zmax').value=this.value;fastRelayout();">
+      </div>
+      <div class="ctrl-row">
+        <label>R max (mm)</label>
+        <input type="range" id="sl-rmax" min="5" max="200" value="50" step="1"
+               style="flex:1;" oninput="document.getElementById('inp-rmax').value=this.value;fastRelayout();">
+        <input type="number" class="spinbox" id="inp-rmax" value="50" min="5" max="500" step="1"
+               style="width:50px;" oninput="document.getElementById('sl-rmax').value=Math.min(200,this.value);fastRelayout();">
+      </div>
+    </div>
+
+  </div>
+
+  <div id="right-area">
+    <div id="ex-area">
+      <div id="ex-area-header">
+        <h3>Excitation Energies</h3>
+        <button onclick="addRow()">+ Add</button>
+        <button onclick="deleteRow()">&minus; Remove</button>
+      </div>
+      <table id="ExTable">
+        <thead>
+          <tr>
+            <th>E<sub>x</sub> [MeV]</th>
+            <th>&#952;<sub>CM</sub> [&#176;]</th>
+            <th>E<sub>b</sub> [MeV]</th>
+            <th>Z<sub>0b</sub> [mm]</th>
+            <th>Z<sub>b</sub> [mm]</th>
+            <th>2&#961;_b [mm]</th>
+            <th>&#952;Lab<sub>b</sub> [&#176;]</th>
+            <th>T<sub>b</sub> [ns]</th>
+            <th>E<sub>B</sub> [MeV]</th>
+            <th>&#952;Lab<sub>B</sub> [&#176;]</th>
+            <th>Z<sub>0B</sub>/2 [mm]</th>
+            <th>2&#961;<sub>B</sub> [mm]</th>
+          </tr>
+        </thead>
+        <tbody id="ex-tbody">
+          <tr>
+            <td><input type="number" id="Ex1" value="0.000" step="0.001" oninput="scheduleUpdate()"></td>
+            <td><input type="number" id="theta1" value="45" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
+            <td class="calc-cell" id="c1-Eb"></td><td class="calc-cell" id="c1-Zb0"></td>
+            <td class="calc-cell" id="c1-Zb"></td><td class="calc-cell" id="c1-2rb"></td>
+            <td class="calc-cell" id="c1-thb"></td><td class="calc-cell" id="c1-Tb"></td>
+            <td class="calc-cell" id="c1-EB"></td><td class="calc-cell" id="c1-thB"></td>
+            <td class="calc-cell" id="c1-ZB0h"></td><td class="calc-cell" id="c1-2rB"></td>
+          </tr>
+          <tr>
+            <td><input type="number" id="Ex2" value="1.000" step="0.001" oninput="scheduleUpdate()"></td>
+            <td><input type="number" id="theta2" value="45" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
+            <td class="calc-cell" id="c2-Eb"></td><td class="calc-cell" id="c2-Zb0"></td>
+            <td class="calc-cell" id="c2-Zb"></td><td class="calc-cell" id="c2-2rb"></td>
+            <td class="calc-cell" id="c2-thb"></td><td class="calc-cell" id="c2-Tb"></td>
+            <td class="calc-cell" id="c2-EB"></td><td class="calc-cell" id="c2-thB"></td>
+            <td class="calc-cell" id="c2-ZB0h"></td><td class="calc-cell" id="c2-2rB"></td>
+          </tr>
+          <tr>
+            <td><input type="number" id="Ex3" value="2.000" step="0.001" oninput="scheduleUpdate()"></td>
+            <td><input type="number" id="theta3" value="45" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
+            <td class="calc-cell" id="c3-Eb"></td><td class="calc-cell" id="c3-Zb0"></td>
+            <td class="calc-cell" id="c3-Zb"></td><td class="calc-cell" id="c3-2rb"></td>
+            <td class="calc-cell" id="c3-thb"></td><td class="calc-cell" id="c3-Tb"></td>
+            <td class="calc-cell" id="c3-EB"></td><td class="calc-cell" id="c3-thB"></td>
+            <td class="calc-cell" id="c3-ZB0h"></td><td class="calc-cell" id="c3-2rB"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div id="plot-area">
+      <div id="plot-ez"></div>
+      <div id="plot-rz"></div>
+    </div>
+  </div>
+</div>
+
+<script src="plotly.min.js"></script>
+<script>
+// =====================================================================
+// Constants & state (mirrors heliosmatics.js)
+const c = 299.792468; // mm/ns
+
+const SHORTHAND = {
+  'p':'1H','d':'2H','t':'3H','h':'3He','a':'4He',
+  'D':'2H','T':'3H','H':'3He','A':'4He','alpha':'4He'
+};
+
+const COLORS = [
+  'rgb(31,119,180)','rgb(255,127,14)','rgb(44,160,44)',
+  'rgb(214,39,40)','rgb(148,103,189)','rgb(140,86,75)',
+  'rgb(227,119,194)','rgb(127,127,127)','rgb(188,189,34)',
+  'rgb(23,190,207)'
+];
+
+// HELIOS geometry constants
+let heliosPosOffsets = [0, 58.6, 117.9, 176.8, 235.8, 294.0]; // mm
+let nDet = 6;
+let detLen = 50; // mm
+let perpDist = 11.5; // mm
+let detGap  = 5;   // mm
+let boreMM  = 462.5; // mm (used in bore curve)
+
+function setSSType(type) {
+  if (type === 'HELIOS') {
+    perpDist = 11.5; detGap = 5; detLen = 50; nDet = 6;
+    heliosPosOffsets = [0, 58.6, 117.9, 176.8, 235.8, 294.5];
+    boreMM = 462.5;
+  } else if (type === 'SOLARIS') {
+    perpDist = 11.5; detGap = 5; detLen = 50; nDet = 10;
+    // SOLARIS: evenly spaced, first det nearest target
+    heliosPosOffsets = Array.from({length:10}, (_,i) => i*(detLen+detGap));
+    boreMM = 462.5;
+  } else if (type === 'ISS') {
+    perpDist = 28.75; detGap = 0.5; detLen = 125; nDet = 4;
+    heliosPosOffsets = Array.from({length:4}, (_,i) => i*(detLen+detGap));
+    boreMM = 450;
+  }
+  fullUpdate();
+}
+function getRdtInner() { return parseFloat(document.getElementById('inp-rdt-inner')?.value||10); }
+function getRdtOuter() { return parseFloat(document.getElementById('inp-rdt-outer')?.value||40.2); }
+
+// Nuclear cache: .beam .target .light .heavy = {A, Z, mass, name}
+const nucCache = {};
+
+// Physics state (computed by CalConstants)
+let beam_k_lab, E_tot_cm, KE_cm, beta, gamma_cm;
+let ez_slope, alpha, alpha_B;
+let BField = -3.0;
+
+// Table row counter
+let rowCounter = 3;
+
+// =====================================================================
+// SLIDER / SPINBOX SYNC
+function syncSpinFromSlider(which) {
+  const sl = document.getElementById('sl-' + which);
+  const sp = document.getElementById('sp-' + which);
+  if (!sl || !sp) return;
+  sp.value = sl.value;
+}
+function syncSliderFromSpin(which) {
+  const sl = document.getElementById('sl-' + which);
+  const sp = document.getElementById('sp-' + which);
+  if (!sl || !sp) return;
+  sl.value = sp.value;
+}
+
+// =====================================================================
+// MASS LOOKUP
+async function lookupNuc(role) {
+  const raw = document.getElementById('inp-' + role).value.trim();
+  const AZ = SHORTHAND[raw] || raw;
+  if (AZ !== raw) document.getElementById('inp-' + role).value = AZ;
+  const info = document.getElementById('info-' + role);
+  info.textContent = '...';
+  info.style.color = '#888';
+  try {
+    const r = await fetch('/api/mass?AZ=' + encodeURIComponent(AZ));
+    const d = await r.json();
+    if (d.ok) {
+      nucCache[role] = { A: d.A, Z: d.Z, mass: d.mass, name: d.name || AZ };
+      info.textContent = d.mass.toFixed(3) + ' MeV/c²';
+      info.style.color = '#1a8a3a';
+      if (nucCache.beam && nucCache.target && nucCache.light) computeHeavy();
+      scheduleUpdate();
+    } else {
+      info.textContent = d.error || 'Not found';
+      info.style.color = '#c0392b';
+    }
+  } catch(e) {
+    info.textContent = 'Error';
+    info.style.color = '#c0392b';
+  }
+}
+
+function computeHeavy() {
+  const b = nucCache.beam, t = nucCache.target, l = nucCache.light;
+  if (!b || !t || !l) return;
+  const AH = b.A + t.A - l.A;
+  const ZH = b.Z + t.Z - l.Z;
+  fetch('/api/mass?A=' + AH + '&Z=' + ZH)
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        nucCache.heavy = { A: AH, Z: ZH, mass: d.mass, name: d.name || (AH + '?'), Sn: d.Sn, Sp: d.Sp, Sa: d.Sa };
+        scheduleUpdate();
+      }
+    }).catch(() => {});
+}
+
+// =====================================================================
+// CALCCONSTANTS (mirrors heliosmatics.js CalConstants exactly)
+function CalConstants() {
+  const b = nucCache.beam, t = nucCache.target, l = nucCache.light, h = nucCache.heavy;
+  if (!b || !t || !l || !h) return false;
+
+  const beamEx = parseFloat(document.getElementById('inp-beamex').value) || 0;
+  const Ma = b.mass + beamEx; // excited beam mass
+  const Mt = t.mass;
+  const KEA = parseFloat(document.getElementById('inp-energy').value) || 8.8;
+  const KE = KEA * b.A;
+
+  BField = parseFloat(document.getElementById('sp-bfield').value) || -3;
+
+  beam_k_lab = Math.sqrt(Math.pow(Ma + KE, 2) - Math.pow(Ma, 2));
+  E_tot_cm   = Math.sqrt(Math.pow(Ma + Mt, 2) + 2 * Mt * KE);
+  KE_cm      = E_tot_cm - Ma - Mt;
+
+  beta    = beam_k_lab / (Ma + Mt + KE);
+  gamma_cm = 1.0 / Math.sqrt(1 - beta * beta);
+
+  const Zb = l.Z;
+  const ZH = h.Z;
+
+  ez_slope = Math.abs(BField) * c * Zb * beta / (2 * Math.PI * 1000); // MeV/mm
+  alpha    = ez_slope / beta;
+  alpha_B  = Math.abs(BField) * c * ZH * beta / (2 * Math.PI * 1000) / beta;
+
+  // Q-value and min beam energy (mirrors SOLARIS CalConstants)
+  const Qval = Ma + Mt - l.mass - h.mass;
+  const minKEA = (Math.pow(l.mass + h.mass, 2) - Math.pow(Ma + Mt, 2)) / 2 / Mt / b.A;
+
+  // Update reaction title
+  // Inverse kinematics: beam(target,light)heavy
+  const rxn = (b.name||'?') + (beamEx>0?'*':'') + '(' + (t.name||'?') + ',' + (l.name||'?') + ')' + (h.name||'?')
+              + ' @ ' + KEA + ' MeV/u, ' + BField.toFixed(2) + ' T';
+  document.getElementById('rx-title').textContent = rxn;
+
+  // Update reaction info panel
+  const qEl = document.getElementById('rx-qval');
+  const mEl = document.getElementById('rx-minE');
+  const hEl = document.getElementById('rx-heavy');
+  const sEl = document.getElementById('rx-sep');
+  if (qEl) qEl.textContent = Qval.toFixed(3);
+  if (mEl) mEl.textContent = minKEA > 0 ? minKEA.toFixed(3) : '0 (exothermic)';
+  if (hEl) hEl.textContent = (h.name || '?') + (h.mass ? ' (' + h.mass.toFixed(2) + ' MeV/c²)' : '');
+  // Sn/Sp/Sa from nucCache.heavy if available
+  if (sEl && h.Sn !== undefined) {
+    sEl.textContent = 'Sn=' + (h.Sn||'?') + '  Sp=' + (h.Sp||'?') + '  Sa=' + (h.Sa||'?') + '  [MeV]';
+  } else if (sEl) {
+    sEl.textContent = 'Sn/Sp/Sa: lookup heavy mass to get values';
+  }
+
+  return true;
+}
+
+// =====================================================================
+// TWO-BODY KINEMATICS for a single (Ex, thetaCM) point
+// mirrors CalculateEZ() row logic from heliosmatics.js
+function calcRow(Ex, thetaCM_deg) {
+  const l = nucCache.light, h = nucCache.heavy;
+  const Mb = l.mass;
+  const MH_ex = h.mass + Ex;
+
+  const haha1 = E_tot_cm * E_tot_cm - Math.pow(MH_ex + Mb, 2);
+  const haha2 = E_tot_cm * E_tot_cm - Math.pow(MH_ex - Mb, 2);
+  if (haha1 <= 0 || haha2 <= 0) return null;
+  const k_cm = Math.sqrt(haha1 * haha2) / 2 / E_tot_cm;
+
+  const thetaRad = thetaCM_deg * Math.PI / 180;
+  const cs = Math.cos(thetaRad);
+  const ss = Math.sin(thetaRad);
+
+  const qb = Math.sqrt(Mb * Mb + k_cm * k_cm);
+
+  // Light recoil
+  const Eb  = gamma_cm * qb - gamma_cm * beta * k_cm * cs - Mb;
+  const Zb0 = (gamma_cm * beta * qb - gamma_cm * k_cm * cs) / alpha;
+  if (Math.abs(ss) < 1e-6) return null; // thetaCM=0 or 180: on-axis, no helical orbit
+  const rho = k_cm * ss / c / l.Z / Math.abs(BField) * 1000; // mm
+
+  let Zb = Zb0;
+  const sinArg = (rho > 0 && isFinite(rho)) ? perpDist / rho / 2 : 2;
+  if (Math.abs(sinArg) <= 1) {
+    Zb = Zb0 * (1 - Math.asin(sinArg) / Math.PI);
+  }
+  const thetaLab_b = 180 - Math.atan2(k_cm * ss, gamma_cm * (beta * qb - k_cm * cs)) * 180 / Math.PI;
+  const Tcyc = (Mb + Eb) / alpha / c;
+
+  // Heavy recoil
+  const qB       = Math.sqrt(MH_ex * MH_ex + k_cm * k_cm);
+  const EB        = gamma_cm * qB + gamma_cm * beta * k_cm * cs - MH_ex;
+  const ZB0       = (gamma_cm * beta * qB + gamma_cm * k_cm * cs) / alpha_B;
+  const rhoB      = (Math.abs(ss) < 1e-10) ? Infinity : k_cm * ss / c / h.Z / Math.abs(BField) * 1000;
+  const thetaLab_B = Math.atan2(-k_cm * ss, gamma_cm * (beta * qB + k_cm * cs)) * 180 / Math.PI;
+
+  return { Eb, Zb0, Zb, rho, thetaLab_b, Tcyc, EB, ZB0, rhoB, thetaLab_B, k_cm, qb };
+}
+
+// =====================================================================
+// FILL EX TABLE
+function fillExTable() {
+  const tbody = document.getElementById('ex-tbody');
+  const rows = tbody.querySelectorAll('tr');
+  rows.forEach((tr, idx) => {
+    const rowId = tr.dataset.rowid || (idx + 1);
+    const ExEl    = document.getElementById('Ex' + rowId);
+    const thetaEl = document.getElementById('theta' + rowId);
+    if (!ExEl || !thetaEl) return;
+
+    const Ex      = parseFloat(ExEl.value) || 0;
+    const thetaCM = parseFloat(thetaEl.value) || 45;
+
+    const p = calcRow(Ex, thetaCM);
+    const set = (id, val) => {
+      const el = document.getElementById('c' + rowId + '-' + id);
+      if (el) el.textContent = val;
+    };
+
+    if (!p || !isFinite(p.Eb) || p.Eb < -1) {
+      ['Eb','Zb0','Zb','2rb','thb','Tb','EB','thB','ZB0h','2rB'].forEach(k => set(k, '—'));
+      return;
+    }
+    set('Eb',   p.Eb.toFixed(3));
+    set('Zb0',  p.Zb0.toFixed(1));
+    set('Zb',   p.Zb.toFixed(1));
+    set('2rb',  (2 * p.rho).toFixed(1));
+    set('thb',  p.thetaLab_b.toFixed(2));
+    set('Tb',   p.Tcyc.toFixed(2));
+    set('EB',   p.EB.toFixed(3));
+    set('thB',  p.thetaLab_B.toFixed(2));
+    set('ZB0h', (p.ZB0 / 2).toFixed(2));
+    set('2rB',  (2 * p.rhoB).toFixed(2));
+  });
+}
+
+// =====================================================================
+// BUILD KINEMATIC TRACES (log-spaced thetaCM, mirrors heliosmatics loop)
+function buildTraces() {
+  const tbody = document.getElementById('ex-tbody');
+  const rows  = Array.from(tbody.querySelectorAll('tr'));
+  const thSteps = Math.max(20, parseInt(document.getElementById('inp-thsteps').value) || 200);
+
+  const tracesEZ = [];
+  const tracesRZ = [];
+
+  // Arrays for R-Z: per Ex row, at the θ_CM specified in that row
+  const Zb0List  = [];
+  const rhoList  = [];
+  const ZB0List  = [];
+  const rhoBList = [];
+  const ExList   = [];
+  const ThetaList = []; // θ_CM per row
+
+  rows.forEach((tr, idx) => {
+    const rowId = tr.dataset.rowid || (idx + 1);
+    const ExEl = document.getElementById('Ex' + rowId);
+    if (!ExEl) return;
+    const Ex = parseFloat(ExEl.value) || 0;
+    ExList.push(Ex);
+    const col = COLORS[idx % COLORS.length];
+
+    // --- Kinematic line: log-spaced thetaCM (mirrors heliosmatics j=0..99)
+    const xArr = [], yArr = [];
+    for (let j = 0; j < 100; j++) {
+      const thetaCM = Math.PI / Math.log10(100) * Math.log10(100 / (100 - j));
+      const thetaDeg = thetaCM * 180 / Math.PI;
+      const pt = calcRow(Ex, thetaDeg);
+      if (!pt || !isFinite(pt.Zb) || !isFinite(pt.Eb) || pt.Eb < 0) continue;
+      // Skip unphysical points: rho too small (can't reach detector) or infinite (on-axis, ss≈0)
+      if (!isFinite(pt.rho) || pt.rho < perpDist / 2) continue;
+      // Skip if Zb is on the wrong side (e.g. upstream array needs z<0)
+      if (pt.Zb > 0 && pt.Zb0 > 0 && pt.Zb0 > 1e4) continue;
+      xArr.push(pt.Zb);
+      yArr.push(pt.Eb);
+    }
+    tracesEZ.push({
+      x: xArr, y: yArr, mode: 'lines', name: 'Ex=' + Ex.toFixed(3),
+      line: { color: col, width: 2 }
+    });
+
+    // R-Z: use θ_CM from this Ex row (mirrors SOLARIS exactly)
+    const thetaEl = document.getElementById('theta' + rowId);
+    const thetaCM_row = thetaEl ? (parseFloat(thetaEl.value) || 45) : 45;
+    ThetaList.push(thetaCM_row);
+    const ptRow = calcRow(Ex, thetaCM_row);
+    Zb0List.push(ptRow ? ptRow.Zb0  : NaN);
+    rhoList.push(ptRow ? ptRow.rho  : NaN);
+    ZB0List.push(ptRow ? ptRow.ZB0  : NaN);
+    rhoBList.push(ptRow ? ptRow.rhoB : NaN);
+  });
+
+  // R-Z curves
+  const zArr = [];
+  for (let z = -2000; z <= 4000; z += 2) zArr.push(z);
+
+  for (let i = 0; i < ExList.length; i++) {
+    const col = COLORS[i % COLORS.length];
+
+    // Light: z < 0
+    // Light recoil: direction determined by Zb0 sign (SOLARIS: target[0]>light[0] → downstream)
+    const bUpstream = Zb0List[i] < 0; // Zb0 negative → upstream orbit
+    const rbArr = zArr.map(z => {
+      if (bUpstream && z > 0) return NaN;  // upstream: only z<0
+      if (!bUpstream && z < 0) return NaN; // downstream: only z>0
+      return (isFinite(Zb0List[i]) && Zb0List[i] !== 0)
+        ? 2 * rhoList[i] * Math.abs(Math.sin(z * Math.PI / Zb0List[i]))
+        : NaN;
+    });
+    tracesRZ.push({
+      x: zArr, y: rbArr, mode: 'lines', name: 'b Ex=' + ExList[i].toFixed(3) + ',θ=' + ThetaList[i].toFixed(0) + '°',
+      line: { color: col, width: 2 }
+    });
+
+    // Heavy: z > 0
+    const rBArr = zArr.map(z => {
+      if (z < 0) return NaN;
+      return (isFinite(ZB0List[i]) && ZB0List[i] !== 0)
+        ? 2 * rhoBList[i] * Math.abs(Math.sin(z * Math.PI / ZB0List[i]))
+        : NaN;
+    });
+    tracesRZ.push({
+      x: zArr, y: rBArr, mode: 'lines', name: 'B Ex=' + ExList[i].toFixed(3) + ',θ=' + ThetaList[i].toFixed(0) + '°',
+      line: { color: col, width: 1.5, dash: 'dot' }
+    });
+  }
+
+  // θ_CM reference line (mirrors PlotThetaCMLine in heliosmatics.js) — angle from slider
+  const thetaCM_line = parseFloat(document.getElementById('sp-thline')?.value ?? 0);
+  if (CalConstants()) {
+    const Mb = nucCache.light.mass;
+    const cs = Math.cos(thetaCM_line * Math.PI / 180);
+    const ss = Math.sin(thetaCM_line * Math.PI / 180); // = 0 for thetaCM=0
+    const kaka = Math.pow(gamma_cm * ss, 2);
+    const zzEZ = [], eEZ = [];
+    for (let z = -2000; z <= 2000; z += 20) {
+      const a1 = Mb * Mb * (1 - kaka);
+      const disc = alpha * alpha * z * z + a1;
+      if (disc < 0) continue;
+      const E = (cs * Math.sqrt(disc) - kaka * ez_slope * z) / (1 - kaka || 1e-10) - Mb;
+      if (isFinite(E) && E >= 0) { zzEZ.push(z); eEZ.push(E); }
+    }
+    if (zzEZ.length > 0) {
+      tracesEZ.push({
+        x: zzEZ, y: eEZ, mode: 'lines', name: 'θ_CM=' + thetaCM_line.toFixed(0) + '°',
+        line: { color: 'rgb(100,100,100)', width: 1, dash: 'solid' }
+      });
+    }
+
+    // Bore curve (mirrors PlotBore in heliosmatics.js)
+    // E(z) = sqrt((z² + π²*bore²)*alpha² + Mb²) - Mb
+    // boreMM is the module-level let, updated by setSSType()
+    const zzBore = [], eBore = [];
+    for (let z = -2000; z <= 2000; z += 20) {
+      const E = Math.sqrt((z * z + Math.PI * Math.PI * boreMM * boreMM) * alpha * alpha + Mb * Mb) - Mb;
+      if (isFinite(E) && E >= 0) { zzBore.push(z); eBore.push(E); }
+    }
+    tracesEZ.push({
+      x: zzBore, y: eBore, mode: 'lines', name: 'Bore',
+      line: { color: 'rgb(180,180,180)', width: 1 }
+    });
+  }
+
+  return { tracesEZ, tracesRZ };
+}
+
+// =====================================================================
+// BUILD SHAPES (detector boxes + RDT)
+function buildShapes(firstPos, rdtPos) {
+  const shapesEZ = [];
+  const shapesRZ = [];
+
+  // 6 HELIOS detectors
+  for (let i = 0; i < nDet; i++) {
+    let z0, z1;
+    if (firstPos < 0) {
+      // upstream: det[i].z0 = firstPos - pos[nDet-1-i] - detLen
+      z0 = firstPos - heliosPosOffsets[nDet - 1 - i] - detLen;
+      z1 = firstPos - heliosPosOffsets[nDet - 1 - i];
+    } else {
+      z0 = firstPos + heliosPosOffsets[i];
+      z1 = firstPos + heliosPosOffsets[i] + detLen;
+    }
+
+    // E-Z: yref=paper
+    shapesEZ.push({
+      type: 'rect', xref: 'x', yref: 'paper',
+      x0: z0, x1: z1, y0: 0, y1: 1,
+      fillcolor: 'rgba(70,100,255,0.09)',
+      line: { width: 0.8, color: 'rgba(70,100,255,0.35)' }
+    });
+
+    // R-Z: yref=y, y0=0, y1=perpDist
+    shapesRZ.push({
+      type: 'rect', xref: 'x', yref: 'y',
+      x0: z0, x1: z1, y0: 0, y1: perpDist,
+      fillcolor: 'rgba(70,100,255,0.10)',
+      line: { width: 0.8, color: 'rgba(70,100,255,0.35)' }
+    });
+  }
+
+  // RDT — vertical line on E-Z
+  shapesEZ.push({
+    type: 'line', xref: 'x', yref: 'paper',
+    x0: rdtPos, x1: rdtPos, y0: 0, y1: 1,
+    line: { color: '#e03030', width: 1.5, dash: 'dash' }
+  });
+
+  // RDT — red rect on R-Z
+  shapesRZ.push({
+    type: 'rect', xref: 'x', yref: 'y',
+    x0: rdtPos, x1: rdtPos + 10,
+    y0: getRdtInner(), y1: getRdtOuter(),
+    fillcolor: 'rgba(220,40,40,0.30)',
+    line: { width: 1, color: '#e03030' }
+  });
+
+  return { shapesEZ, shapesRZ };
+}
+
+// =====================================================================
+// X RANGE (mirrors SOLARIS AdjustRangeEZ)
+function calcXRange(firstPos) {
+  const arrayLen = heliosPosOffsets[nDet - 1] + detLen; // 290 + 50 = 340
+  if (firstPos < 0) {
+    return [firstPos - arrayLen - 100, firstPos + 100];
+  } else {
+    return [firstPos - 100, firstPos + arrayLen + 100];
+  }
+}
+
+// =====================================================================
+// FAST RELAYOUT — slider drag only updates shapes + xrange
+function fastRelayout() {
+  const firstPos = parseFloat(document.getElementById('sp-array').value);
+  const rdtPos   = parseFloat(document.getElementById('sp-rdt').value);
+  const { shapesEZ, shapesRZ } = buildShapes(firstPos, rdtPos);
+  const xRange = calcXRange(firstPos);
+  try {
+    const _rMax = parseFloat(document.getElementById('inp-rmax')?.value||50);
+  const _ezXR = calcXRange(firstPos);
+  const _zMin = parseFloat(document.getElementById('inp-zmin')?.value||-600);
+  const _zMax = parseFloat(document.getElementById('inp-zmax')?.value||200);
+  Plotly.relayout('plot-ez', { 'xaxis.range': _ezXR, shapes: shapesEZ });
+    Plotly.relayout('plot-rz', { 'xaxis.range': [_zMin, _zMax], 'yaxis.range': [0, _rMax], shapes: shapesRZ });
+  } catch(e) {}
+}
+
+// =====================================================================
+// FULL UPDATE — recalculate everything, redraw plots
+let _updateTimer = null;
+function scheduleUpdate() {
+  clearTimeout(_updateTimer);
+  _updateTimer = setTimeout(fullUpdate, 150);
+}
+
+function fullUpdate() {
+  if (!CalConstants()) return;
+  fillExTable();
+  const { tracesEZ, tracesRZ } = buildTraces();
+
+  const firstPos = parseFloat(document.getElementById('sp-array').value);
+  const rdtPos   = parseFloat(document.getElementById('sp-rdt').value);
+  const { shapesEZ, shapesRZ } = buildShapes(firstPos, rdtPos);
+  const zMin_inp = parseFloat(document.getElementById('inp-zmin')?.value||-600);
+  const zMax_inp = parseFloat(document.getElementById('inp-zmax')?.value||200);
+  const rMax_inp = parseFloat(document.getElementById('inp-rmax')?.value||50);
+  const xRange = calcXRange(firstPos);   // E-Z: auto from array pos
+  const rzXRange = [zMin_inp, zMax_inp]; // R-Z: manual
+  const eMax   = parseFloat(document.getElementById('inp-emax').value) || 12;
+
+  const rxTitle = document.getElementById('rx-title')?.textContent || 'HELIOS Kinematics';
+  const layoutEZ = {
+    title: { text: rxTitle, font: { size: 13 } },
+    paper_bgcolor: '#fff', plot_bgcolor: '#f9f9f9',
+    font: { color: '#222', family: 'Arial,sans-serif', size: 12 },
+    xaxis: { title: 'Z [mm]', range: xRange, mirror: 'allticks', linewidth: 1,
+             gridcolor: '#ddd', zerolinecolor: '#bbb' },
+    yaxis: { title: 'Energy [MeV]', range: [0, eMax], mirror: 'allticks', linewidth: 1,
+             gridcolor: '#ddd', zerolinecolor: '#bbb' },
+    shapes: shapesEZ,
+    legend: { bgcolor: 'rgba(255,255,255,0.85)', font: { size: 11 },
+              yanchor: 'top', xanchor: 'left', x: 0.01, y: 0.99 },
+    margin: { l: 55, r: 15, t: 30, b: 45 },
+    dragmode: 'pan'
+  };
+
+  const layoutRZ = {
+    paper_bgcolor: '#fff', plot_bgcolor: '#f9f9f9',
+    font: { color: '#222', family: 'Arial,sans-serif', size: 12 },
+    xaxis: { title: 'Z [mm]', range: xRange, mirror: 'allticks', linewidth: 1,
+             gridcolor: '#ddd', zerolinecolor: '#bbb' },
+    yaxis: { title: 'R [mm]', range: [0, rMax_inp], mirror: 'allticks', linewidth: 1,
+             gridcolor: '#ddd', zerolinecolor: '#bbb' },
+    shapes: shapesRZ,
+    legend: { bgcolor: 'rgba(255,255,255,0.85)', font: { size: 11 },
+              yanchor: 'top', xanchor: 'left', x: 0.01, y: 0.99 },
+    margin: { l: 55, r: 15, t: 30, b: 45 },
+    dragmode: 'pan'
+  };
+
+  const cfg = { responsive: true, displayModeBar: true, displaylogo: false,
+                modeBarButtonsToRemove: ['lasso2d','select2d'] };
+
+  Plotly.react('plot-ez', tracesEZ, layoutEZ, cfg);
+  Plotly.react('plot-rz', tracesRZ, layoutRZ, cfg);
+  // Re-apply manual R-Z z-range (prevent fullUpdate from resetting it)
+  const _rzZmin = parseFloat(document.getElementById('inp-zmin')?.value||-600);
+  const _rzZmax = parseFloat(document.getElementById('inp-zmax')?.value||200);
+  const _rzRmax = parseFloat(document.getElementById('inp-rmax')?.value||50);
+  Plotly.relayout('plot-rz', { 'xaxis.range': [_rzZmin, _rzZmax], 'yaxis.range': [0, _rzRmax] });
+}
+
+// =====================================================================
+// ADD / REMOVE ROW
+function addRow() {
+  rowCounter++;
+  const id = rowCounter;
+  const tbody = document.getElementById('ex-tbody');
+  const tr = document.createElement('tr');
+  tr.dataset.rowid = id;
+
+  // Random Ex: 0 to Sn (neutron transfer) or Sp (proton transfer) based on light recoil Z
+  // If light recoil Z=1 (proton): use Sp of heavy. If Z=0 (neutron): use Sn. Else use min(Sn,Sp).
+  let exMax = 5.0; // default fallback
+  const h = nucCache.heavy, l = nucCache.light;
+  if (h && l) {
+    const lZ = l.Z || 1;
+    if (lZ === 1 && h.Sp) exMax = h.Sp;       // proton transfer: Sp
+    else if (lZ === 0 && h.Sn) exMax = h.Sn;  // neutron transfer: Sn
+    else if (h.Sn && h.Sp) exMax = Math.min(h.Sn, h.Sp);
+    else if (h.Sn) exMax = h.Sn;
+    else if (h.Sp) exMax = h.Sp;
+  }
+  const randEx    = (Math.random() * exMax).toFixed(3);
+  const randTheta = Math.floor(Math.random() * 40 + 1); // 1-40 deg
+
+  tr.innerHTML =
+    '<td><input type="number" id="Ex' + id + '" value="' + randEx + '" step="0.001" oninput="scheduleUpdate()"></td>' +
+    '<td><input type="number" id="theta' + id + '" value="' + randTheta + '" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>' +
+    '<td class="calc-cell" id="c' + id + '-Eb"></td>' +
+    '<td class="calc-cell" id="c' + id + '-Zb0"></td>' +
+    '<td class="calc-cell" id="c' + id + '-Zb"></td>' +
+    '<td class="calc-cell" id="c' + id + '-2rb"></td>' +
+    '<td class="calc-cell" id="c' + id + '-thb"></td>' +
+    '<td class="calc-cell" id="c' + id + '-Tb"></td>' +
+    '<td class="calc-cell" id="c' + id + '-EB"></td>' +
+    '<td class="calc-cell" id="c' + id + '-thB"></td>' +
+    '<td class="calc-cell" id="c' + id + '-ZB0h"></td>' +
+    '<td class="calc-cell" id="c' + id + '-2rB"></td>';
+  tbody.appendChild(tr);
+  scheduleUpdate();
+}
+
+function deleteRow() {
+  const tbody = document.getElementById('ex-tbody');
+  if (tbody.rows.length > 1) {
+    tbody.deleteRow(tbody.rows.length - 1);
+    scheduleUpdate();
+  }
+}
+
+// =====================================================================
+// LOAD CONFIG FROM SERVER
+// Sources: detectorGeo.txt (geometry) + reactionConfig.txt (nuclides)
+// Then auto-run build_reaction.py to recompute helios_reaction.json
+async function loadFromServerFull() {
+  const statusEl = document.querySelector('#rx-status') || document.querySelector('#info-beam');
+  try {
+    // Step 1: Read detectorGeo.txt + reactionConfig.txt via /api/config
+    const r2 = await fetch('/api/config');
+    const d2 = await r2.json();
+
+    if (d2.detGeo) {
+      const g = d2.detGeo;
+      if (g.Bfield !== undefined) {
+        document.getElementById('sl-bfield').value = g.Bfield;
+        document.getElementById('sp-bfield').value = parseFloat(g.Bfield).toFixed(2);
+      }
+      if (g.firstPos !== undefined) {
+        document.getElementById('sl-array').value = g.firstPos;
+        document.getElementById('sp-array').value = g.firstPos;
+      }
+      if (g.recoilPos !== undefined) {
+        document.getElementById('sl-rdt').value = g.recoilPos;
+        document.getElementById('sp-rdt').value = g.recoilPos;
+      }
+      if (g.recoilInner !== undefined)
+        document.getElementById('inp-rdt-inner').value = g.recoilInner;
+      if (g.recoilOuter !== undefined)
+        document.getElementById('inp-rdt-outer').value = g.recoilOuter;
+    }
+
+    if (d2.reactionConfig) {
+      const rc = d2.reactionConfig;
+      if (rc.beam_label)         document.getElementById('inp-beam').value   = rc.beam_label;
+      if (rc.target_label)       document.getElementById('inp-target').value = rc.target_label;
+      if (rc.recoil_light_label) document.getElementById('inp-light').value  = rc.recoil_light_label;
+      if (rc.beam_energy_MeVu) {
+        document.getElementById('inp-energy').value = rc.beam_energy_MeVu;
+        document.getElementById('sl-energy').value  = Math.min(30, rc.beam_energy_MeVu);
+      }
+
+      // Step 2: Save reactionConfig values to helios_reaction.json
+      const rxData = {
+        beam_A: rc.beam_A, beam_Z: rc.beam_Z,
+        target_A: rc.target_A, target_Z: rc.target_Z,
+        recoil_light_A: rc.recoil_light_A, recoil_light_Z: rc.recoil_light_Z,
+        beam_energy_MeVu: rc.beam_energy_MeVu,
+        Bfield: d2.detGeo ? d2.detGeo.Bfield : -3.0,
+      };
+      await fetch('/api/reaction_config', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(rxData)
+      });
+
+      // Step 3: Run build_reaction.py — recomputes masses from AME2020
+      const rb = await fetch('/api/build_reaction');
+      const rbd = await rb.json();
+      if (rbd.ok && rbd.reaction) {
+        const rx = rbd.reaction;
+        // Populate nucCache from freshly computed values
+        const EL_full = ['n','H','He','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn','Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr','Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn'];
+        function azLabel(A, Z) { return A + (EL_full[Z] || '?'); }
+        nucCache.beam   = { A: parseInt(rc.beam_A),         Z: parseInt(rc.beam_Z),         mass: rx.Ma,     name: rx.beam_label };
+        nucCache.target = { A: parseInt(rc.target_A),       Z: parseInt(rc.target_Z),       mass: rx.Mt,     name: rx.target_label };
+        nucCache.light  = { A: parseInt(rc.recoil_light_A), Z: parseInt(rc.recoil_light_Z), mass: rx.mass_b, name: rx.recoil_light_label };
+        const hA = parseInt(rc.beam_A)+parseInt(rc.target_A)-parseInt(rc.recoil_light_A);
+        const hZ = parseInt(rc.beam_Z)+parseInt(rc.target_Z)-parseInt(rc.recoil_light_Z);
+        // Fetch heavy Sn/Sp/Sa separately
+        nucCache.heavy  = { A: hA, Z: hZ, mass: rx.mass_B, name: rx.recoil_heavy_label || azLabel(hA,hZ) };
+        fetch('/api/mass?A=' + hA + '&Z=' + hZ).then(r=>r.json()).then(md=>{
+          if (md.ok) { nucCache.heavy.Sn=md.Sn; nucCache.heavy.Sp=md.Sp; nucCache.heavy.Sa=md.Sa; }
+        }).catch(()=>{});
+        document.getElementById('info-beam').textContent   = rx.Ma   ? rx.Ma.toFixed(3)+' MeV/c²'   : '?';
+        document.getElementById('info-target').textContent = rx.Mt   ? rx.Mt.toFixed(3)+' MeV/c²'   : '?';
+        document.getElementById('info-light').textContent  = rx.mass_b ? rx.mass_b.toFixed(3)+' MeV/c²' : '?';
+        ['info-beam','info-target','info-light'].forEach(id =>
+          document.getElementById(id).style.color = '#1a8a3a');
+        // Update page title with reaction string
+        document.getElementById('reaction-title').textContent = rx.reaction_str || '';
+        scheduleUpdate();
+      }
+    }
+  } catch(e) {
+    console.warn('loadFromServerFull error:', e);
+  }
+
+  // Fallback: look up masses from API if nucCache incomplete
+  if (!nucCache.beam)  await lookupNuc('beam');
+  if (!nucCache.target) await lookupNuc('target');
+  if (!nucCache.light) await lookupNuc('light');
+  if (!nucCache.heavy && nucCache.beam && nucCache.target && nucCache.light) computeHeavy();
+  scheduleUpdate();
+}
+
+// =====================================================================
+// RESIZE
+window.addEventListener('resize', () => {
+  try { Plotly.Plots.resize('plot-ez'); Plotly.Plots.resize('plot-rz'); } catch(e) {}
+});
+
+// =====================================================================
+// INIT
+window.addEventListener('load', () => {
+  // Set rowid on initial rows (created in HTML without data-rowid)
+  const tbody = document.getElementById('ex-tbody');
+  Array.from(tbody.rows).forEach((tr, i) => {
+    if (!tr.dataset.rowid) tr.dataset.rowid = i + 1;
+  });
+  loadFromServerFull();
+});
+</script>
+</body>
+</html>

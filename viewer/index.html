@@ -5,7 +5,7 @@
   <title>HELIOS 3D Detector Map</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0d1117; color: #e6edf3; font-family: 'Courier New', monospace; overflow: hidden; }
+    body { background: #0d1117; color: #e6edf3; font-family: 'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace; overflow: hidden; }
     #canvas-container { width: 100vw; height: 100vh; }
     #tooltip {
       position: fixed; top: 16px; left: 16px;
@@ -24,7 +24,7 @@
       border-radius: 8px; padding: 12px 16px; font-size: 12px; min-width: 240px;
     }
     #ui h3 { color: #ffa657; margin-bottom: 8px; font-size: 14px; letter-spacing: 1px; }
-    #ui .control { margin: 6px 0; display: flex; align-items: center; gap: 8px; }
+    #ui .control, #event-panel .control { margin: 6px 0; display: flex; align-items: center; gap: 8px; }
     #ui label { color: #8b949e; flex: 1; }
     #ui select, #ui input[type=range], #ui input[type=number] {
       background: #161b22; border: 1px solid #30363d; color: #e6edf3;
@@ -74,9 +74,9 @@
 <div style="position:fixed;top:16px;right:16px;">
   <div id="ui">
     <h3>☀ HELIOS</h3>
-    <div class="control"><label>Bore opacity</label><input type="range" id="bore-opacity" min="0" max="40" value="20"></div>
-    <div class="control"><label>Rotate speed</label><input type="range" id="rotate-speed" min="0" max="100" value="0"></div>
-    <div class="control"><label>B-field (T)</label><input type="range" id="bfield" min="-5" max="5" value="-3" step="0.1" style="width:70px;"><span id="bfield-val" style="color:#ffa657;min-width:40px;">-3.0 T</span></div>
+    <div class="control"><label>Bore opacity</label><input type="range" id="bore-opacity" min="0" max="40" value="20" style="width:136px;"></div>
+    <div class="control"><label>Rotate speed</label><input type="range" id="rotate-speed" min="0" max="100" value="0" style="width:136px;"></div>
+    <div class="control"><label>B-field (T)</label><input type="range" id="bfield" min="-5" max="5" value="-3" step="0.1" style="width:60px;"><input type="number" id="bfield-val" min="-5" max="5" step="0.1" value="-3" style="width:68px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:2px 4px;font-family:monospace;"></div>
     <div class="control"><label>Color mode</label>
       <select id="color-mode">
         <option value="row">By Row (side)</option>
@@ -94,7 +94,7 @@
     <div class="control" style="flex-direction:column;align-items:stretch;gap:4px;">
       <input type="range" id="target-z" min="-400" max="400" value="0" step="5" style="width:100%;">
       <div style="display:flex;justify-content:space-between;font-size:10px;color:#484f58;"><span>-400mm</span><span>0</span><span>+400mm</span></div>
-      <div style="font-size:10px;color:#484f58;margin-top:2px;">← upstream &nbsp;&nbsp;&nbsp; downstream →</div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#484f58;margin-top:2px;"><span>← upstream</span><span>downstream →</span></div>
     </div>
     <div class="sep"></div>
     <button id="reset-view-btn" style="width:100%;padding:5px;background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">⟳ Reset View</button>
@@ -102,61 +102,82 @@
     <div class="info" id="geo-info">Loading...</div>
   </div>
 </div>
-<div style="position:fixed;bottom:16px;right:16px;">
-  <div style="background:rgba(13,17,23,0.88);border:1px solid #30363d;border-radius:8px;padding:12px 16px;font-size:12px;display:flex;gap:20px;align-items:flex-start;">
+<div id="bottom-right-panel" style="position:fixed;bottom:16px;right:16px;display:flex;flex-direction:row;align-items:flex-end;gap:8px;">
+<div id="event-info-box" style="
+  background:rgba(13,17,23,0.88);border:1px solid #30363d;border-radius:8px;
+  padding:8px 12px;font-size:11px;font-family:'Consolas','Menlo',monospace;
+  display:none;min-width:220px;max-width:300px;z-index:50;">
+  <div style="color:#8b949e;font-size:10px;margin-bottom:4px;letter-spacing:0.5px;">LAST EVENT</div>
+  <div id="event-info" style="color:#e6edf3;line-height:1.7;"></div>
+</div>
 
-    <!-- Geometry column -->
-    <div style="min-width:140px;">
-      <div style="color:#ffa657;font-weight:bold;margin-bottom:8px;font-size:13px;">⚙ Geometry</div>
-      <div class="control"><label>Array pos (mm)</label><input type="number" id="array-pos" value="-121" min="-600" max="600" step="1" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
-      <div class="control"><label>RDT pos (mm)</label><input type="number" id="rdt-pos" value="1000" min="100" max="3000" step="10" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
-      <button id="load-config-btn" style="width:100%;margin-top:6px;padding:4px;background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">↓ Load digios</button>
-      <button id="apply-geo-btn" style="width:100%;margin-top:4px;padding:4px;background:#21262d;border:1px solid #3fb950;color:#3fb950;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">▶ Apply</button>
-      <div id="config-status" style="font-size:10px;color:#484f58;margin-top:4px;max-width:140px;word-break:break-word;">—</div>
-    </div>
+  <div style="background:rgba(13,17,23,0.88);border:1px solid #30363d;border-radius:8px;padding:12px 16px;font-size:12px;">
+  <div style="display:flex;gap:20px;align-items:flex-start;">
 
-    <!-- Reaction column -->
-    <div style="min-width:150px;">
-      <div style="color:#79c0ff;font-weight:bold;margin-bottom:8px;font-size:13px;">⚛ Reaction</div>
-      <div style="display:grid;grid-template-columns:auto 52px 52px;gap:3px 6px;align-items:center;">
-        <span style="color:#8b949e;">Beam</span>
-        <input type="number" id="rx-beam-A" value="32" min="1" max="300" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;" title="A">
-        
-        <input type="number" id="rx-beam-Z" value="14" min="0" max="120" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;" title="Z">
-        <span style="color:#8b949e;">Target</span>
-        <input type="number" id="rx-tgt-A" value="2" min="1" max="300" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
-        
-        <input type="number" id="rx-tgt-Z" value="1" min="0" max="120" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
-        <span style="color:#8b949e;">Recoil b</span>
-        <input type="number" id="rx-rec-A" value="1" min="1" max="300" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
-        
-        <input type="number" id="rx-rec-Z" value="1" min="0" max="120" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
-        <span style="color:#8b949e;">E MeV/u</span>
-        <input type="number" id="rx-energy" value="8.8" min="0.1" max="100" step="0.1" style="width:52px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
-
-      </div>
-      <button id="rx-build-btn" style="width:100%;margin-top:6px;padding:4px;background:#21262d;border:1px solid #79c0ff;color:#79c0ff;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">⚙ Compute</button>
-      <div id="rx-status" style="font-size:10px;color:#484f58;margin-top:4px;max-width:150px;word-break:break-word;">—</div>
-    </div>
-
-    <!-- Kinematics column -->
+    <!-- Kinematics column (first) -->
     <div id="event-panel" style="min-width:160px;">
       <div style="color:#ffa657;font-weight:bold;margin-bottom:8px;font-size:13px;">⚡ Kinematics</div>
       <div class="control"><label>θ_CM (deg)</label><input type="number" id="theta-cm" value="45" min="0" max="180" step="1"></div>
       <div class="control"><label>φ_CM (deg)</label><input type="number" id="phi-cm" value="30" min="0" max="360" step="1"></div>
       <div class="control"><label>Ex (MeV)</label><input type="number" id="ex-mev" value="0" min="0" max="10" step="0.1"></div>
       <div class="control"><label>Anim speed</label><input type="range" id="anim-speed" min="1" max="20" value="8"></div>
-      <div class="control"><label>Random θ,φ</label><input type="checkbox" id="random-angles" checked></div>
-      <div class="control"><label>Stop on support</label><input type="checkbox" id="stop-on-support" checked></div>
+      <div class="control"><label>Random θ,φ</label><input type="checkbox" id="random-angles" checked style="margin-left:8px;"></div>
+      <div class="control"><label>Stop on support</label><input type="checkbox" id="stop-on-support" checked style="margin-left:8px;"></div>
       <div class="control"><label>Rate /sec</label><input type="range" id="gen-rate" min="1" max="10" value="3" step="1"><span id="gen-rate-val" style="color:#ffa657;">3/s</span></div>
       <div class="control"><label>Keep N</label><input type="range" id="keep-n" min="1" max="20" value="5" step="1"><span id="keep-n-val" style="color:#ffa657;">5</span></div>
       <button id="gen-btn">▶ Generate</button>
       <button id="auto-btn">▶▶ Auto</button>
       <button id="clear-btn">✕ Clear</button>
-      <div class="sep" style="margin-top:6px;"></div>
-      <div id="event-info" style="font-size:10px;color:#484f58;">Press Generate.</div>
     </div>
 
+    <!-- Geometry column (second) -->
+    <div style="min-width:140px;">
+      <div style="color:#ffa657;font-weight:bold;margin-bottom:8px;font-size:13px;">⚙ Geometry</div>
+      <div class="control"><label>Array pos (mm)</label><input type="number" id="array-pos" value="-121" min="-600" max="600" step="1" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
+      <div class="control"><label>RDT pos (mm)</label><input type="number" id="rdt-pos" value="1000" min="100" max="3000" step="10" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
+      <button id="load-config-btn" style="width:100%;margin-top:6px;padding:4px;background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">↓ Load digios</button>
+      <button id="apply-geo-btn" style="width:100%;margin-top:4px;padding:4px;background:#21262d;border:1px solid #3fb950;color:#3fb950;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">▶ Apply</button>
+    </div>
+
+    <!-- Reaction column -->
+    <div style="min-width:150px;">
+      <div style="color:#79c0ff;font-weight:bold;margin-bottom:8px;font-size:13px;">⚛ Reaction</div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="color:#8b949e;width:52px;font-size:11px;">Beam</span>
+          <input type="text" id="rx-beam-sym" value="32Si" placeholder="e.g. 32Si"
+            style="width:70px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 5px;font-family:monospace;"
+            onkeydown="if(event.key==='Enter')resolveSymbol('beam')">
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="color:#8b949e;width:52px;font-size:11px;">Target</span>
+          <input type="text" id="rx-tgt-sym" value="2H" placeholder="e.g. d"
+            style="width:70px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 5px;font-family:monospace;"
+            onkeydown="if(event.key==='Enter')resolveSymbol('target')">
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="color:#8b949e;width:52px;font-size:11px;">Recoil b</span>
+          <input type="text" id="rx-rec-sym" value="1H" placeholder="e.g. p"
+            style="width:70px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 5px;font-family:monospace;"
+            onkeydown="if(event.key==='Enter')resolveSymbol('recoil')">
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="color:#8b949e;width:52px;font-size:11px;">E MeV/u</span>
+          <input type="number" id="rx-energy" value="8.8" min="0.1" max="100" step="0.1"
+            style="width:70px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;">
+        </div>
+      </div>
+      <!-- Hidden A/Z fields for compatibility -->
+      <input type="hidden" id="rx-beam-A" value="32"><input type="hidden" id="rx-beam-Z" value="14">
+      <input type="hidden" id="rx-tgt-A" value="2"><input type="hidden" id="rx-tgt-Z" value="1">
+      <input type="hidden" id="rx-rec-A" value="1"><input type="hidden" id="rx-rec-Z" value="1">
+      <button id="rx-build-btn" style="width:100%;margin-top:6px;padding:4px;background:#21262d;border:1px solid #79c0ff;color:#79c0ff;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">⚙ Compute</button>
+      <div id="rx-status" style="font-size:10px;color:#484f58;margin-top:4px;max-width:150px;word-break:break-word;">—</div>
+    </div>
+
+    <!-- Reaction column (third) -->
+
+  </div>
   </div>
 </div>
 <div id="legend">
@@ -165,6 +186,8 @@
   <div class="sep"></div>
   <div class="li"><div class="sw" style="background:#44aaff;"></div><span>Light recoil (b)</span></div>
   <div class="li"><div class="sw" style="background:#ff8844;"></div><span>Heavy recoil (B)</span></div>
+  <div class="sep"></div>
+  <a href="kinematics.html" style="display:block;text-align:center;padding:5px 8px;background:#21262d;border:1px solid #30363d;border-radius:4px;font-size:11px;color:#79c0ff;text-decoration:none;font-family:monospace;">📊 Kinematic Plot</a>
 </div>
 <div id="status">—</div>
 
@@ -769,12 +792,23 @@ let eventHistory = []; // list of {lightAnim, heavyAnim} per event, for fade man
 let autoGenInterval = null;
 let isAutoGen = false;
 
+function setEventInfo(html, color) {
+  const el = document.getElementById('event-info');
+  const box = document.getElementById('event-info-box');
+  if (typeof html === 'string' && html) {
+    el.innerHTML = html;
+    el.style.color = color || '#e6edf3';
+    box.style.display = 'block';
+  } else {
+    box.style.display = 'none';
+  }
+}
+
 function clearTracks() {
   animations = [];
   eventHistory = [];
   while (trackGroup.children.length) trackGroup.remove(trackGroup.children[0]);
-  document.getElementById('event-info').textContent = 'Tracks cleared.';
-  document.getElementById('event-info').style.color = '#484f58';
+  setEventInfo('', '');
 }
 
 function pruneOldTracks() {
@@ -857,7 +891,7 @@ function generateEvent(autoMode = false) {
   const useRandom = document.getElementById('random-angles').checked;
   const thetaCM = useRandom ? Math.random() * 170 + 5 : parseFloat(document.getElementById('theta-cm').value);
   const phiCM   = useRandom ? Math.random() * 360     : parseFloat(document.getElementById('phi-cm').value);
-  const Ex      = parseFloat(document.getElementById('ex-mev').value);
+  const Ex      = useRandom ? Math.random() * 5 : parseFloat(document.getElementById('ex-mev').value);
 
   const Bfield = GEO.Bfield;
   // Time-based N: fixed time step = T_cyc/100 (100 points per orbit)
@@ -902,7 +936,7 @@ function generateEvent(autoMode = false) {
   }
 
   if (!trackB_light) {
-    document.getElementById('event-info').textContent = canGoUpstream ? 'Below threshold or no valid events.' : `A_b ≥ A_t: light recoil cannot go upstream. Showing downstream.`;
+    setEventInfo(canGoUpstream ? 'Below threshold or no valid events.' : 'A_b ≥ A_t: light recoil cannot go upstream. Showing downstream.', '#ff7b72');
     return;
   }
 
@@ -914,7 +948,7 @@ function generateEvent(autoMode = false) {
   // Heavy recoil always downstream
   const trackB_heavy = computeTrack(REACTION.mass_B, REACTION.charge_B, thetaCM_used, phiCM_used, Ex, Bfield, false);
   if (!trackB_heavy) {
-    document.getElementById('event-info').textContent = 'Heavy recoil: below threshold.';
+    setEventInfo('Heavy recoil: below threshold.', '#ff7b72');
     return;
   }
 
@@ -932,8 +966,7 @@ function generateEvent(autoMode = false) {
   console.log('[gen]', dbg);
 
   if (ptsLight.length < 2 || ptsHeavy.length < 2) {
-    document.getElementById('event-info').textContent = 'No track: ' + dbg;
-    document.getElementById('event-info').style.color = '#ff7b72';
+    setEventInfo('No track: ' + dbg, '#ff7b72');
     return;
   }
 
@@ -1013,11 +1046,11 @@ function generateEvent(autoMode = false) {
   document.getElementById('event-info').innerHTML =
     `θ_CM=${thetaCM_used.toFixed(1)}° φ=${phiCM_used.toFixed(1)}° ${dirLabel}<br>` +
     `Ex=${Ex.toFixed(2)} MeV<br>` +
-    `<span style="color:#44aaff">b</span>: θ_lab=${trackB_light.thetaLab_deg.toFixed(1)}° &nbsp; Ek=${(trackB_light.E_kin).toFixed(1)} MeV &nbsp; ρ=${trackB_light.rho.toFixed(0)}mm<br>` +
+    `<span style="color:#44aaff">b</span>: θ_lab=${trackB_light.thetaLab_deg.toFixed(1)}° &nbsp; Ek=${(trackB_light.E_kin).toFixed(1)} MeV &nbsp; ρ=${trackB_light.rho.toFixed(0)} mm<br>` +
     `<span style="color:#44aaff">b hit</span>: <span style="color:${lightResult.hitDet?'#3fb950':'#ff7b72'}">${lHit}</span><br>` +
-    `<span style="color:#ff8844">B</span>: θ_lab=${trackB_heavy.thetaLab_deg.toFixed(1)}° &nbsp; Ek=${(trackB_heavy.E_kin/1000).toFixed(2)} GeV &nbsp; ρ=${trackB_heavy.rho.toFixed(0)}mm<br>` +
+    `<span style="color:#ff8844">B</span>: θ_lab=${trackB_heavy.thetaLab_deg.toFixed(1)}° &nbsp; Ek=${(trackB_heavy.E_kin/1000).toFixed(2)} GeV &nbsp; ρ=${trackB_heavy.rho.toFixed(0)} mm<br>` +
     `<span style="color:#ff8844">B hit</span>: <span style="color:${heavyResult.hitRecoil?'#3fb950':'#ff7b72'}">${rHit}</span>`;
-  document.getElementById('event-info').style.color = '#e6edf3';
+  document.getElementById('event-info-box').style.display = 'block';
 }
 
 // Step the animation each frame
@@ -1135,8 +1168,7 @@ document.getElementById('show-axes').addEventListener('change', function() {
 document.getElementById('gen-btn').addEventListener('click', () => {
   try { generateEvent(false); }
   catch(e) {
-    document.getElementById('event-info').textContent = 'Error: ' + e.message;
-    document.getElementById('event-info').style.color = '#ff7b72';
+    setEventInfo('Error: ' + e.message, '#ff7b72');
     console.error(e);
   }
 });
@@ -1217,8 +1249,34 @@ function animate() {
 // GEOMETRY PANEL — load from digios + apply
 // ═══════════════════════════════════════════════════════════════════
 // Rebuild labels whenever reaction A/Z fields change
-['rx-beam-A','rx-beam-Z'].forEach(id => document.getElementById(id).addEventListener('input', buildBeamArrow));
-['rx-tgt-A','rx-tgt-Z'].forEach(id => document.getElementById(id).addEventListener('input', buildTarget));
+// Symbol shorthand resolver for reaction inputs
+const RX_SHORTHAND = {p:'1H',n:'1n',d:'2H',D:'2H',t:'3H',T:'3H',h:'3He',H:'3He',a:'4He',A:'4He',alpha:'4He'};
+const RX_EL = ['n','H','He','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn','Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr','Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn'];
+
+function resolveSymbol(role) {
+  const prefix = role==='recoil' ? 'rx-rec' : role==='beam' ? 'rx-beam' : 'rx-tgt';
+  const inp = document.getElementById(prefix+'-sym');
+  const info = document.getElementById(prefix+'-info');
+  if (!inp) return;
+  const raw = inp.value.trim();
+  const resolved = RX_SHORTHAND[raw] || RX_SHORTHAND[raw.toLowerCase()] || raw;
+  inp.value = resolved;
+  const m = resolved.match(/^(\d+)([A-Za-z]+)$/);
+  if (!m) { if(info){ info.textContent='?'; info.style.color='#ff7b72'; } return; }
+  const A = parseInt(m[1]);
+  const sym = m[2];
+  const Z = RX_EL.findIndex(s => s.toLowerCase()===sym.toLowerCase());
+  if (Z < 0) { if(info){ info.textContent='unknown'; info.style.color='#ff7b72'; } return; }
+  document.getElementById(prefix+'-A').value = A;
+  document.getElementById(prefix+'-Z').value = Z;
+  if (info) { info.textContent = `Z=${Z}`; info.style.color='#3fb950'; }
+  if (role==='beam')   buildBeamArrow();
+  if (role==='target') buildTarget();
+}
+
+// Hidden A/Z fields still fire events for backward compat — keep these
+['rx-beam-A','rx-beam-Z'].forEach(id => { const el=document.getElementById(id); if(el) el.addEventListener('input', buildBeamArrow); });
+['rx-tgt-A','rx-tgt-Z'].forEach(id => { const el=document.getElementById(id); if(el) el.addEventListener('input', buildTarget); });
 
 // Reaction panel — load from helios_reaction.json on startup
 async function loadReactionJson() {
@@ -1229,6 +1287,9 @@ async function loadReactionJson() {
   } catch(e) { /* standalone mode — no server or file */ }
 }
 
+function azToSym(A, Z) {
+  return A + (RX_EL[Z] || ('Z'+Z));
+}
 function applyReactionConfig(rx) {
   if (rx.beam_A)         document.getElementById('rx-beam-A').value = rx.beam_A;
   if (rx.beam_Z)         document.getElementById('rx-beam-Z').value = rx.beam_Z;
@@ -1236,6 +1297,13 @@ function applyReactionConfig(rx) {
   if (rx.target_Z)       document.getElementById('rx-tgt-Z').value  = rx.target_Z;
   if (rx.recoil_light_A) document.getElementById('rx-rec-A').value  = rx.recoil_light_A;
   if (rx.recoil_light_Z) document.getElementById('rx-rec-Z').value  = rx.recoil_light_Z;
+  // Also update symbol text fields
+  if (rx.beam_label)         { const el=document.getElementById('rx-beam-sym'); if(el) el.value=rx.beam_label; }
+  else if (rx.beam_A && rx.beam_Z) { const el=document.getElementById('rx-beam-sym'); if(el) el.value=azToSym(rx.beam_A,rx.beam_Z); }
+  if (rx.target_label)       { const el=document.getElementById('rx-tgt-sym'); if(el) el.value=rx.target_label; }
+  else if (rx.target_A && rx.target_Z) { const el=document.getElementById('rx-tgt-sym'); if(el) el.value=azToSym(rx.target_A,rx.target_Z); }
+  if (rx.recoil_light_label) { const el=document.getElementById('rx-rec-sym'); if(el) el.value=rx.recoil_light_label; }
+  else if (rx.recoil_light_A && rx.recoil_light_Z) { const el=document.getElementById('rx-rec-sym'); if(el) el.value=azToSym(rx.recoil_light_A,rx.recoil_light_Z); }
   if (rx.beam_energy_MeVu) document.getElementById('rx-energy').value = rx.beam_energy_MeVu;
   // Update kinematics
   if (rx.mass_b)  REACTION.mass_b  = rx.mass_b;
@@ -1295,7 +1363,13 @@ document.getElementById('rx-build-btn').addEventListener('click', async () => {
 
 document.getElementById('bfield').addEventListener('input', function() {
   const v = parseFloat(this.value);
-  document.getElementById('bfield-val').textContent = (v >= 0 ? '+' : '') + v.toFixed(1) + ' T';
+  document.getElementById('bfield-val').value = v.toFixed(1);
+  if (GEO) GEO.Bfield = v;
+  clearTracks();
+});
+document.getElementById('bfield-val').addEventListener('input', function() {
+  const v = Math.max(-5, Math.min(5, parseFloat(this.value) || 0));
+  document.getElementById('bfield').value = v;
   if (GEO) GEO.Bfield = v;
   clearTracks();
 });
@@ -1316,7 +1390,7 @@ document.getElementById('load-config-btn').addEventListener('click', async () =>
       document.getElementById('rdt-pos').value = d.detGeo.recoilPos;
       const bf = d.detGeo.Bfield;
       document.getElementById('bfield').value = bf;
-      document.getElementById('bfield-val').textContent = (bf >= 0 ? '+' : '') + bf.toFixed(1) + ' T';
+      document.getElementById('bfield-val').value = parseFloat(document.getElementById('bfield').value).toFixed(1);
       if (GEO) GEO.Bfield = bf;
       // Update B-field display in geo-info
       status.textContent = `Loaded: firstPos=${d.detGeo.firstPos}mm  RDT=${d.detGeo.recoilPos}mm  B=${d.detGeo.Bfield}T  bore=${d.detGeo.bore}mm`;
@@ -1334,24 +1408,45 @@ document.getElementById('load-config-btn').addEventListener('click', async () =>
     if (d.reactionConfig && d.reactionConfig.beam_label) {
       buildBeamArrow();
       buildTarget();
-      // Also update charge_B from reactionConfig (beam_A - recoil_light_A, beam_Z - recoil_light_Z)
-      REACTION.charge_B = (d.reactionConfig.beam_Z || 14) + 1 - (d.reactionConfig.recoil_light_Z || 1); // Z_A + Z_a - Z_b
     }
-    if (d.reaction) {
-      // Update REACTION constants live
-      REACTION.mass_b  = d.reaction.mass_b;
-      REACTION.charge_b = d.reaction.charge_b;
-      REACTION.betaCM  = d.reaction.betaCM;
-      REACTION.Ecm     = d.reaction.Ecm;
-      REACTION.mass_B  = d.reaction.mass_B;
-      REACTION.alpha   = d.reaction.alpha;
-      status.textContent += `  | mb=${d.reaction.mass_b.toFixed(0)} mB=${d.reaction.mass_B.toFixed(0)} MeV`;
+    if (d.reactionConfig) {
+      // Save reactionConfig values to helios_reaction.json, then rebuild kinematics
+      const rc = d.reactionConfig;
+      const rxData = {
+        beam_A: rc.beam_A, beam_Z: rc.beam_Z,
+        target_A: rc.target_A, target_Z: rc.target_Z,
+        recoil_light_A: rc.recoil_light_A, recoil_light_Z: rc.recoil_light_Z,
+        beam_energy_MeVu: rc.beam_energy_MeVu,
+        Bfield: d.detGeo ? d.detGeo.Bfield : -3.0,
+      };
+      btn.textContent = '⟳ Computing masses...';
+      await fetch('/api/reaction_config', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(rxData)
+      });
+      const rbCtrl = new AbortController();
+      const rbTimeout = setTimeout(() => rbCtrl.abort(), 15000);
+      const rb = await fetch('/api/build_reaction', { signal: rbCtrl.signal });
+      clearTimeout(rbTimeout);
+      const rbd = await rb.json();
+      if (rbd.ok && rbd.reaction) {
+        const rx = rbd.reaction;
+        REACTION.mass_b   = rx.mass_b;
+        REACTION.charge_b = rx.charge_b || 1;
+        REACTION.betaCM   = rx.betaCM;
+        REACTION.Ecm      = rx.Ecm;
+        REACTION.mass_B   = rx.mass_B;
+        REACTION.charge_B = rx.charge_B || (parseInt(rc.beam_Z)+parseInt(rc.target_Z)-parseInt(rc.recoil_light_Z));
+        status.textContent += `  Q=${rx.Q ? rx.Q.toFixed(3) : '?'} MeV | mb=${rx.mass_b ? rx.mass_b.toFixed(0) : '?'} mB=${rx.mass_B ? rx.mass_B.toFixed(0) : '?'} MeV/c²`;
+        clearTracks();
+      }
     }
   } catch(e) {
     status.textContent = 'Load failed: ' + e;
     status.style.color = '#ff7b72';
+  } finally {
+    btn.disabled = false; btn.textContent = '↓ Load digios';
   }
-  btn.disabled = false; btn.textContent = '↓ Load from digios';
 });
 
 document.getElementById('apply-geo-btn').addEventListener('click', async () => {
@@ -1434,7 +1529,7 @@ fetch('helios_geometry.json')
     GEO = data;
     buildScene();
     document.getElementById('bfield').value = data.Bfield;
-    document.getElementById('bfield-val').textContent = (data.Bfield >= 0 ? '+' : '') + data.Bfield.toFixed(1) + ' T';
+    document.getElementById('bfield-val').value = parseFloat(document.getElementById('bfield').value).toFixed(1);
     document.getElementById('status').textContent = `☀ ${data.nDet*data.mDet} dets loaded | port 8765`;
     setLoadingProgress(100, 'Ready.');
     hideLoading();

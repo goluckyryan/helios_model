@@ -117,7 +117,8 @@ def compute_kinematics(reaction, masses):
     # Labels
     sym_a = element_symbol(Za); sym_t = element_symbol(Zt)
     sym_b = element_symbol(Zb); sym_B = element_symbol(ZB)
-    reaction_str = f"{At}{sym_t}({Aa}{sym_a},{Ab}{sym_b}){AB}{sym_B}"
+    # Inverse kinematics convention: beam(target, light recoil) heavy recoil
+    reaction_str = f"{Aa}{sym_a}({At}{sym_t},{Ab}{sym_b}){AB}{sym_B}"
 
     # Masses (MeV)
     Ma = get_mass(masses, Za, Aa, f'{Aa}{sym_a}')  # beam
@@ -221,6 +222,8 @@ if __name__ == '__main__':
         'Ecm':       result['Ecm'],
         'mass_B':    result['mass_B'],
         'charge_B':  result['charge_B'],
+        'Ma':        result['Ma'],
+        'Mt':        result['Mt'],
         'Q':         result['Q'],
         'beam_label':   result['beam_label'],
         'target_label': result['target_label'],

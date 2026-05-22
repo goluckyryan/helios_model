@@ -182,6 +182,46 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
             self.send_json(result)
 
+        elif self.path.startswith('/api/mass'):
+            # Mass lookup from AME2020: /api/mass?AZ=32Si  or  /api/mass?A=32&Z=14
+            from urllib.parse import urlparse, parse_qs
+            params = parse_qs(urlparse(self.path).query)
+            mass_path = os.path.join(os.path.dirname(DIR), 'mass20.txt')
+            if not os.path.exists(mass_path):
+                self.send_json({'ok': False, 'error': 'mass20.txt not found'}, 404)
+            else:
+                try:
+                    sys.path.insert(0, os.path.dirname(DIR))
+                    from build_reaction import parse_mass_table, element_symbol
+                    masses = parse_mass_table(mass_path)
+                    A = Z = None
+                    if 'AZ' in params:
+                        import re
+                        az = params['AZ'][0].strip()
+                        m = re.match(r'^(\d+)([A-Za-z]+)$', az)
+                        if m: A,Z = int(m.group(1)), next((i for i,s in enumerate(['n','H','He','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn','Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr','Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn']) if s.lower()==m.group(2).lower()), None)
+                    elif 'A' in params and 'Z' in params:
+                        A,Z = int(params['A'][0]), int(params['Z'][0])
+                    if A is None or Z is None:
+                        self.send_json({'ok': False, 'error': 'Bad A/Z'})
+                    else:
+                        N = A - Z
+                        mass = masses.get((Z,A))
+                        mn = masses.get((0,1), 939.565)
+                        mp = masses.get((1,1), 938.272)
+                        m_alpha = masses.get((2,4), 3727.379)  # 4He nuclear mass
+                        Sn = (masses.get((Z,A-1),0) + mn - mass)     if mass and A>1 else None
+                        Sp = (masses.get((Z-1,A-1),0) + mp - mass)   if mass and Z>1 else None
+                        Sa = (masses.get((Z-2,A-4),0) + m_alpha - mass) if mass and A>4 and Z>2 else None
+                        self.send_json({'ok': True, 'A':A,'Z':Z,'N':N,
+                            'mass': round(mass,4) if mass else None,
+                            'name': f'{A}{element_symbol(Z)}',
+                            'Sn': round(Sn,4) if Sn else None,
+                            'Sp': round(Sp,4) if Sp else None,
+                            'Sa': round(Sa,4) if Sa else None})
+                except Exception as e:
+                    self.send_json({'ok': False, 'error': str(e)}, 500)
+
         elif self.path == '/api/reaction_config':
             # Read helios_reaction.json
             if os.path.exists(HELIOS_REACTION_JSON):
@@ -250,8 +290,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     os.chdir(DIR)
+    socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(('', PORT), Handler) as httpd:
-        httpd.allow_reuse_address = True
         print(f'HELIOS 3D viewer: http://localhost:{PORT}')
         print(f'From network:     http://192.168.1.101:{PORT}')
         print(f'Config source:    {DIGIOS_WORKING}')
