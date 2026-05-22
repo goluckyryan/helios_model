@@ -120,18 +120,19 @@ def load_geometry(geo_file="detectorGeo.txt"):
             det_id += 1
 
     # Remap col so col 0 = nearest to target (physical array orientation)
-    # upstream (firstPos<0): detPos index nDet-1 is nearest → remap col = nDet-1-i
-    # downstream (firstPos>0): detPos index 0 is nearest → col = i (already correct)
+    # upstream (firstPos<0): detPos[nDet-1] has highest z (nearest target) → flip col
+    # downstream (firstPos>0): detPos[nDet-1] has highest z (furthest from target=0) → flip col
+    # Both cases: detPos index nDet-1 is furthest from target → always flip
     for d in detectors:
-        if firstPos < 0:
-            d['col'] = nDet - 1 - d['col']  # flip: 0=nearest target
-        # firstPos>0: col already 0=nearest
+        d['col'] = nDet - 1 - d['col']  # flip: col 0 = nearest target always
 
-    # Re-ID: side order = -X(row2), -Y(row3), +X(row0), +Y(row1)
-    # Within each side: det col 0 always nearest to target (physical array orientation)
-    # firstPos < 0 (upstream): nearest target = highest detPos index = col nDet-1
-    # firstPos > 0 (downstream): nearest target = lowest detPos index = col 0
-    side_order = [2, 3, 0, 1]  # row values in ID order
+    # Re-ID: side order depends on array orientation
+    # Upstream (firstPos<0): array faces target from upstream — side order -X,-Y,+X,+Y
+    # Downstream (firstPos>0): array rotated 180° around Y — side order +X,+Y,-X,-Y
+    if firstPos < 0:
+        side_order = [2, 3, 0, 1]  # -X(row2), -Y(row3), +X(row0), +Y(row1)
+    else:
+        side_order = [0, 1, 2, 3]  # +X(row0), +Y(row1), -X(row2), -Y(row3)
     new_id = 0
     # col 0 = nearest target always; iterate col 0 first so detID%nDet==0 = nearest
     col_order = range(0, nDet)
