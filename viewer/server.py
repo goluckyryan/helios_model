@@ -4,7 +4,7 @@ HELIOS 3D Model viewer server — port 8765
 Serves static files + API endpoints.
 """
 
-import http.server, json, os, socketserver, subprocess, sys
+import http.server, json, os, socketserver, subprocess, sys, threading, urllib.request, urllib.error
 
 PORT = 8765
 DIR  = os.path.dirname(os.path.abspath(__file__))
@@ -12,12 +12,133 @@ DIR  = os.path.dirname(os.path.abspath(__file__))
 # Paths to digios working files
 DIGIOS_WORKING = os.path.expanduser('~/digios/analysis/working')
 HELIOS_REACTION_JSON = os.path.join(os.path.dirname(DIR), 'helios_reaction.json')
+MCP_JSON            = os.path.join(os.path.dirname(DIR), 'mcp.json')
+DEFAULT_NDS_URL     = 'http://192.168.203.75:65432/sse'
 BUILD_REACTION_PY    = os.path.join(os.path.dirname(DIR), 'build_reaction.py')
 DETECTOR_GEO   = os.path.join(DIGIOS_WORKING, 'detectorGeo.txt')
 REACTION_DAT   = os.path.join(DIGIOS_WORKING, 'reaction.dat')
 REACTION_CFG   = os.path.join(DIGIOS_WORKING, 'reactionConfig.txt')
 BUILD_GEO_PY   = os.path.join(os.path.dirname(DIR), 'build_geometry.py')
 GEO_JSON       = os.path.join(os.path.dirname(DIR), 'helios_geometry.json')
+
+def read_mcp_config():
+    """Read mcp.json, return dict with nds_url."""
+    if os.path.exists(MCP_JSON):
+        try:
+            with open(MCP_JSON) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {'nds_url': DEFAULT_NDS_URL}
+
+def save_mcp_config(data):
+    with open(MCP_JSON, 'w') as f:
+        json.dump(data, f, indent=2)
+
+def probe_nds(url, timeout=3):
+    """Return True if the SSE endpoint responds with HTTP 200."""
+    try:
+        req = urllib.request.Request(url, headers={'Accept': 'text/event-stream'})
+        # We just need the headers — close immediately
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+def mcp_tool_call(nds_url, tool_name, arguments, timeout=15):
+    """
+    Run one MCP tool call over SSE transport.
+    Returns parsed result dict, or raises RuntimeError on failure.
+    """
+    import time
+    endpoint_path = None
+    result_event  = threading.Event()
+    messages      = []   # SSE message payloads
+    sse_error     = []
+
+    def sse_reader(resp):
+        nonlocal endpoint_path
+        event_type = None
+        try:
+            for raw in resp:
+                line = raw.decode('utf-8').rstrip('\n\r')
+                if line.startswith('event:'):
+                    event_type = line[6:].strip()
+                elif line.startswith('data:'):
+                    data = line[5:].strip()
+                    if event_type == 'endpoint':
+                        endpoint_path = data
+                        ready_evt.set()
+                    elif event_type == 'message':
+                        try:
+                            msg = json.loads(data)
+                            messages.append(msg)
+                            # Only signal done when we have the tool result (id=1)
+                            if msg.get('id') == 1:
+                                result_event.set()
+                        except Exception:
+                            pass
+                elif line == '':
+                    event_type = None
+                if result_event.is_set():
+                    break
+        except Exception as e:
+            sse_error.append(str(e))
+            ready_evt.set()
+            result_event.set()
+
+    ready_evt = threading.Event()
+
+    # Open SSE stream in background thread
+    base = nds_url.rsplit('/sse', 1)[0]
+    req_sse = urllib.request.Request(nds_url, headers={'Accept': 'text/event-stream'})
+    try:
+        sse_resp = urllib.request.urlopen(req_sse, timeout=timeout)
+    except Exception as e:
+        raise RuntimeError(f'SSE connect failed: {e}')
+
+    t = threading.Thread(target=sse_reader, args=(sse_resp,), daemon=True)
+    t.start()
+
+    # Wait for session endpoint
+    if not ready_evt.wait(timeout=5):
+        raise RuntimeError('Timed out waiting for SSE endpoint')
+    if sse_error:
+        raise RuntimeError(sse_error[0])
+
+    def post(payload):
+        url = base + endpoint_path
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(url, data=data,
+            headers={'Content-Type': 'application/json'}, method='POST')
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status
+
+    # MCP handshake
+    post({'jsonrpc':'2.0','id':0,'method':'initialize',
+          'params':{'protocolVersion':'2024-11-05',
+                    'capabilities':{},'clientInfo':{'name':'helios-model','version':'1.0'}}})
+    time.sleep(0.1)
+    post({'jsonrpc':'2.0','method':'notifications/initialized'})
+    time.sleep(0.1)
+
+    # Tool call
+    post({'jsonrpc':'2.0','id':1,'method':'tools/call',
+          'params':{'name': tool_name, 'arguments': arguments}})
+
+    # Wait for result on SSE stream
+    if not result_event.wait(timeout=10):
+        raise RuntimeError('Timed out waiting for tool result')
+
+    # Find the response with id=1
+    for msg in messages:
+        if msg.get('id') == 1:
+            content = msg.get('result', {}).get('content', [])
+            if content and content[0].get('type') == 'text':
+                return json.loads(content[0]['text'])
+            if 'error' in msg:
+                raise RuntimeError(msg['error'].get('message', str(msg['error'])))
+    raise RuntimeError('No result message received')
 
 def parse_detgeo(path):
     """Parse detectorGeo.txt into a dict."""
@@ -160,6 +281,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(body)
             except Exception:
                 self.send_response(404); self.end_headers()
+
+        elif self.path == '/api/mcp_config':
+            self.send_json({'ok': True, **read_mcp_config()})
+
+        elif self.path == '/api/nds/status':
+            cfg = read_mcp_config()
+            url = cfg.get('nds_url', DEFAULT_NDS_URL)
+            reachable = probe_nds(url)
+            self.send_json({'ok': True, 'reachable': reachable, 'nds_url': url})
+
+        elif self.path.startswith('/api/nds/query'):
+            from urllib.parse import urlparse, parse_qs
+            params = parse_qs(urlparse(self.path).query)
+            tool   = params.get('tool', [None])[0]
+            args_s = params.get('args', ['{}'])[0]
+            if not tool:
+                self.send_json({'ok': False, 'error': 'Missing tool param'}, 400)
+            else:
+                try:
+                    cfg = read_mcp_config()
+                    url = cfg.get('nds_url', DEFAULT_NDS_URL)
+                    arguments = json.loads(args_s)
+                    result = mcp_tool_call(url, tool, arguments)
+                    self.send_json({'ok': True, 'result': result})
+                except Exception as e:
+                    self.send_json({'ok': False, 'error': str(e)}, 500)
 
         elif self.path == '/api/data':
             # Placeholder for live EPICS data
@@ -312,7 +459,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(length)
-        if self.path == '/api/reaction_config':
+        if self.path == '/api/mcp_config':
+            try:
+                data = json.loads(body)
+                cfg  = read_mcp_config()
+                cfg.update({k: v for k, v in data.items() if k in ('nds_url',)})
+                save_mcp_config(cfg)
+                self.send_json({'ok': True})
+            except Exception as e:
+                self.send_json({'ok': False, 'error': str(e)}, 500)
+        elif self.path == '/api/reaction_config':
             # Save helios_reaction.json only (no build)
             try:
                 data = json.loads(body)
@@ -340,6 +496,263 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     self.send_json({'ok': False, 'error': r.stderr.strip() or r.stdout.strip()}, 500)
             except Exception as e:
                 self.send_json({'ok': False, 'error': str(e)}, 500)
+
+        elif self.path == '/api/ptolemy':
+            # POST: run Ptolemy DWBA for a set of Ex states
+            # Body: { reaction: {...helios_reaction.json...}, states: [{ex, l, j, nodes}, ...],
+            #         angle_min, angle_max, angle_step }
+            import tempfile, shutil, re
+            try:
+                data      = json.loads(body)
+                rx        = data.get('reaction', {})
+                states    = data.get('states', [])
+                ang_min   = float(data.get('angle_min',   0.0))
+                ang_max   = float(data.get('angle_max', 180.0))
+                ang_step  = float(data.get('angle_step',   1.0))
+                jbiga     = data.get('jbiga', '0+')  # beam ground state J^pi
+
+                if not states:
+                    self.send_json({'ok': False, 'error': 'No states provided'}, 400)
+                    return
+
+                # Build reaction string from helios_reaction.json fields
+                # e.g. "13B(d,3He)12Be"
+                rx_str = rx.get('reaction_str', '')
+                beam_A_val = int(rx.get('beam_A', 1))
+                elab   = float(rx.get('beam_energy_MeVu', 14.0)) * beam_A_val  # total MeV
+
+                # Map A+Z → element symbol
+                ELEM = ['','H','He','Li','Be','B','C','N','O','F','Ne',
+                        'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
+                        'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',
+                        'Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr']
+                def sym(Z): return ELEM[int(Z)] if 0 < int(Z) < len(ELEM) else f'Z{int(Z)}'
+
+                beam_A  = beam_A_val;  beam_Z  = int(rx.get('beam_Z',  1))
+                tgt_A   = int(rx.get('target_A',2));  tgt_Z   = int(rx.get('target_Z',1))
+                lt_A    = int(rx.get('recoil_light_A',1)); lt_Z = int(rx.get('recoil_light_Z',1))
+                hvy_A   = beam_A + tgt_A - lt_A
+                hvy_Z   = beam_Z + tgt_Z - lt_Z
+
+                # projectile = target nucleus in Ptolemy convention
+                # beam hits target → projectile=target particle, target=beam nucleus
+                # Cleopatra convention: BeamNuc(target,light)HeavyNuc
+                beam_lbl = f'{beam_A}{sym(beam_Z)}'
+                tgt_lbl  = f'{tgt_A}{sym(tgt_Z)}'
+                lt_lbl   = f'{lt_A}{sym(lt_Z)}'
+                hvy_lbl  = f'{hvy_A}{sym(hvy_Z)}'
+
+                reaction_label = f'{beam_lbl}({tgt_lbl},{lt_lbl}){hvy_lbl}'
+
+                PTOLEMY    = os.path.expanduser('~/digios/analysis/Cleopatra/ptolemy')
+                GEN_INFILE = os.path.expanduser('~/helios_model/gen_infile.py')
+                PYTHON     = sys.executable
+
+                # Load gen_infile module for direct use
+                import importlib.util as _ilu
+                _gf_spec = _ilu.spec_from_file_location('gen_infile', GEN_INFILE)
+                _gf = _ilu.module_from_spec(_gf_spec)
+                _gf_spec.loader.exec_module(_gf)
+
+                # Compute Q-value from NDS masses if possible
+                # Approximate: use mass excesses from AME (skip for now, pass None -> 0)
+                qvalue = rx.get('Q', None)
+                if qvalue is not None:
+                    qvalue = float(qvalue)
+
+                tmpdir = tempfile.mkdtemp(prefix='ptolemy_')
+                results = []
+                errors  = []
+
+                try:
+                    for st in states:
+                        ex    = float(st.get('ex',    0.0))
+                        l     = int(st.get('l',       0))
+                        j_str = str(st.get('j',       '0.5'))
+                        n     = int(st.get('nodes',   0))
+                        recoil_jpi = st.get('recoil_jpi', '0+')
+
+                        if '/' in j_str:
+                            num, den = j_str.split('/')
+                            j_val = float(num) / float(den)
+                        else:
+                            j_val = float(j_str)
+
+                        # Determine potential codes
+                        pot_in_key  = st.get('pot_in',  'auto')
+                        pot_out_key = st.get('pot_out', 'auto')
+
+                        # Auto: pick based on particle type
+                        def auto_pot(A, Z):
+                            if A==1 and Z==1: return 'K'
+                            if A==2 and Z==1: return 'A'
+                            if A==3 and Z==1: return 'c'
+                            if A==3 and Z==2: return 'x'
+                            if A==4 and Z==2: return 's'
+                            return 'n'
+
+                        if pot_in_key  == 'auto': pot_in_key  = auto_pot(tgt_A, tgt_Z)
+                        if pot_out_key == 'auto': pot_out_key = auto_pot(lt_A,  lt_Z)
+
+                        # Potential reference strings
+                        _POT_REFS = {
+                            'A':'An and Cai (2006)', 'H':'Han, Shi, Shen (2006)',
+                            'D':'Daehnick (1980) REL', 'C':'Daehnick (1980) NON-REL',
+                            'L':'Lohr and Haeberli (1974)', 'Q':'Perey and Perey (1963)',
+                            'Z':'Zhang, Pang, Lou (2016)',
+                            'K':'Koning and Delaroche (2009)', 'V':'Varner CH89 (1991)',
+                            'M':'Menet (1971)', 'G':'Becchetti and Greenlees (1969)',
+                            'P':'Perey (1963)',
+                            'x':'Xu, Guo, Han, Shen (2011)', 'X':'Xu, Guo, Han, Shen (2011)',
+                            'l':'Liang, Li, Cai (2009)', 'p':'Pang (2009)',
+                            'c':'Li, Liang, Cai (2007)', 't':'Trost (1987)',
+                            'h':'Hyakutake (1980)', 'b':'Becchetti and Greenlees (1971)',
+                            's':'Su and Han (2015)', 'S':'Su and Han (2015)',
+                            'a':'Avrigeanu (2009)', 'f':'Bassani and Picard (1969)',
+                            'n':'zero (neutron)',
+                        }
+                        pot_in_ref  = _POT_REFS.get(pot_in_key,  pot_in_key)
+                        pot_out_ref = _POT_REFS.get(pot_out_key, pot_out_key)
+
+                        try:
+                            in_content = _gf.gen_infile(
+                                beam_A=beam_A, beam_Z=beam_Z,
+                                target_A=tgt_A, target_Z=tgt_Z,
+                                light_A=lt_A,  light_Z=lt_Z,
+                                beam_energy_MeVu=float(rx.get('beam_energy_MeVu', elab/beam_A_val)),
+                                ex=ex, nodes=n, l=l, j=j_val,
+                                recoil_jpi=recoil_jpi,
+                                jbiga=jbiga,
+                                pot_in_code=pot_in_key,
+                                pot_out_code=pot_out_key,
+                                pot_in_ref=pot_in_ref,
+                                pot_out_ref=pot_out_ref,
+                                ang_min=ang_min, ang_max=ang_max, ang_step=ang_step,
+                                qvalue=qvalue,
+                            )
+                        except Exception as ge:
+                            errors.append({'msg': f'Ex={ex}: gen_infile failed: {ge}', 'in_file': ''})
+                            continue
+
+                        in_file = os.path.join(tmpdir, f'state_ex{ex:.3f}_l{l}.in')
+                        with open(in_file, 'w') as fh: fh.write(in_content)
+
+
+                        # Run Ptolemy (Cleopatra binary)
+                        fort_pat = os.path.join(tmpdir, 'fort.*')
+                        import glob
+                        for f in glob.glob(fort_pat): os.remove(f)
+
+                        pty_r = subprocess.run(
+                            [PTOLEMY],
+                            stdin=open(in_file),
+                            capture_output=True, text=True,
+                            timeout=60, cwd=tmpdir
+                        )
+
+                        # Parse output: extract CM angle + dσ/dΩ (mb/sr) column
+                        angles = []; xsec = []
+                        in_xsec = False
+                        for line in pty_r.stdout.splitlines():
+                            if 'COMPUTATION OF CROSS SECTIONS' in line:
+                                in_xsec = True; continue
+                            if not in_xsec: continue
+                            # Data lines: leading spaces + float angle + xsec (may be NaN)
+                            m = re.match(r'^\s+(\d+\.\d+)\s+(NaN|[\d\.Ee+\-]+)\s+', line)
+                            if m:
+                                val = m.group(2)
+                                angles.append(float(m.group(1)))
+                                xsec.append(float('nan') if val == 'NaN' else float(val))
+                            # Stop at TOTAL line
+                            if line.strip().startswith('0TOTAL:'):
+                                break
+
+                        # Filter out all-NaN results
+                        import math
+                        valid = [(a, x) for a, x in zip(angles, xsec) if not math.isnan(x)]
+                        if valid:
+                            angles, xsec = zip(*valid)
+                            angles, xsec = list(angles), list(xsec)
+                        else:
+                            angles, xsec = [], []
+
+                        if not angles:
+                            # Try to extract Ptolemy's reason from output
+                            reason = ''
+                            lines_out = pty_r.stdout.splitlines()
+                            for i, line in enumerate(lines_out):
+                                if 'INCOMPATABLE' in line:
+                                    reason = line.strip().lstrip('0*').strip()
+                                    break
+                                if 'ERROR IN INPUT' in line:
+                                    # Grab next non-empty line for JA/JB details
+                                    for j in range(i+1, min(i+4, len(lines_out))):
+                                        nxt = lines_out[j].strip()
+                                        if nxt:
+                                            reason = nxt
+                                            break
+                                    if not reason:
+                                        reason = 'ERROR IN INPUT'
+                                    break
+                            if not reason:
+                                recoil_jpi_str = st.get('recoil_jpi', '?')
+                                recoil_par = recoil_jpi_str[-1] if recoil_jpi_str and recoil_jpi_str[-1] in '+-' else '?'
+                                beam_par = jbiga[-1] if jbiga and jbiga[-1] in '+-' else '?'
+                                # expected recoil parity = beam_parity * (-1)^l
+                                if beam_par != '?' and recoil_par != '?':
+                                    beam_sign   = +1 if beam_par  == '+' else -1
+                                    recoil_sign = +1 if recoil_par == '+' else -1
+                                    expected    = beam_sign * ((-1)**l)
+                                    exp_char    = '+' if expected > 0 else '-'
+                                    def parse_j(s):
+                                        s = s.strip().rstrip('+-')
+                                        if '/' in s:
+                                            n2, d2 = s.split('/')
+                                            return float(n2)/float(d2)
+                                        try: return float(s)
+                                        except: return None
+                                    j_beam   = parse_j(jbiga)
+                                    j_recoil = parse_j(recoil_jpi_str)
+                                    j_trans  = parse_j(str(j_str))
+                                    if expected != recoil_sign:
+                                        reason = (f'parity mismatch: beam({beam_par}) x (-1)^l={l} = ({exp_char}), '
+                                                  f'but recoil Jpi={recoil_jpi_str} needs ({recoil_par}). '
+                                                  f'Try l={l+1}')
+                                    elif j_beam is not None and j_recoil is not None and j_trans is not None:
+                                        j_min = abs(j_beam - j_trans)
+                                        j_max = j_beam + j_trans
+                                        if not (j_min - 0.01 <= j_recoil <= j_max + 0.01):
+                                            reason = (f'coupling blocked: beam J={j_beam}, j={j_str} '
+                                                      f'gives range [{j_min:.1f},{j_max:.1f}], cannot reach J={j_recoil}')
+                                        else:
+                                            reason = ('Ptolemy NaN: parity and coupling OK but numerical result is NaN. '
+                                                      'Possible causes: high energy overflow, lmax too low, or wavefunction issue. '
+                                                      'Try increasing lmax or check Show .in file.')
+                                    else:
+                                        reason = 'no cross section -- check selection rules'
+                                else:
+                                    reason = 'no cross section -- check l/j/Jpi selection rules'
+                            errors.append({'msg': f'Ex={ex} (l={l} j={j_str} Jpi={st.get("recoil_jpi","?")}): {reason}', 'in_file': in_content})
+                            continue
+
+                        results.append({
+                            'ex': ex, 'l': l, 'j': j_str, 'nodes': n,
+                            'recoil_jpi': st.get('recoil_jpi', ''),
+                            'angles': angles, 'xsec': xsec,
+                            'in_file': in_content,
+                        })
+
+                        # Clean up .in files for next iteration
+                        for f in os.listdir(tmpdir):
+                            if f.endswith('.in'): os.remove(os.path.join(tmpdir, f))
+                finally:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+
+                self.send_json({'ok': True, 'results': results, 'errors': errors,
+                                'reaction': reaction_label})
+            except Exception as e:
+                self.send_json({'ok': False, 'error': str(e)}, 500)
+
         else:
             self.send_response(404); self.end_headers()
 

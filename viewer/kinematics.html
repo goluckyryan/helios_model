@@ -72,14 +72,62 @@
     }
     table#ExTable td:first-child, table#ExTable td:nth-child(2) { text-align:center; }
     table#ExTable input[type=number] { width:70px; padding:1px 3px; font-size:11px; }
+    table#ExTable input.orb-inp { width:58px; }
+    table#ExTable select.pot-sel { font-size:11px; background:#fff; border:1px solid #ccc; border-radius:3px; padding:1px 2px; max-width:72px; }
     .calc-cell { color:#1a4f8a; background:#f7faff; font-family:monospace; font-size:11px; min-width:68px; }
 
     #plot-area {
       flex:1; min-height:0; overflow:hidden;
       display:flex; flex-wrap:wrap; align-content:flex-start;
     }
+    #nds-box { display:flex; flex-direction:column; gap:5px; }
+    #nds-status-row { display:flex; align-items:center; gap:6px; }
+    #nds-dot { width:9px; height:9px; border-radius:50%; background:#ccc; flex-shrink:0; }
+    #nds-dot.ok  { background:#2e7d32; }
+    #nds-dot.err { background:#c0392b; }
+    #nds-url-inp { flex:1; font-size:11px; min-width:0; }
+    #nds-err-msg { color:#c0392b; font-size:11px; font-weight:bold; }
+    #nds-controls { display:flex; flex-direction:column; gap:4px; }
+    #nds-results {
+      max-height:180px; overflow-y:auto; font-size:11px; color:#222;
+      border:1px solid #e0e0e0; border-radius:3px; padding:4px 6px;
+      background:#fafafa; line-height:1.6;
+    }
+    #nds-levels {
+      max-height:160px; overflow-y:auto; font-size:11px;
+      border:1px solid #e0e0e0; border-radius:3px; background:#fafafa;
+    }
+    #nds-levels table { border-collapse:collapse; width:100%; }
+    #nds-levels th { background:#f0f3f7; border-bottom:1px solid #ddd;
+      padding:2px 5px; font-size:10px; color:#555; text-align:left; }
+    #nds-levels td { padding:2px 5px; border-bottom:1px solid #f0f0f0; }
+    #nds-levels tr:last-child td { border-bottom:none; }
+
     #plot-ez, #plot-rz {
-      min-width:450px; min-height:450px; flex:1 1 450px;
+      min-width:300px; min-height:450px; flex:1 1 50%;
+    }
+    #plot-dwba, #plot-mc {
+      min-width:300px; min-height:450px; flex:1 1 50%;
+    }
+
+    #thetacm-area {
+      border-top:1px solid #ddd; padding:6px 8px; background:#fff;
+      flex-shrink:0; overflow-x:auto;
+    }
+    #thetacm-area h3 { font-size:12px; font-weight:bold; color:#444; margin-bottom:5px; }
+    #thetacm-inputs { display:flex; align-items:center; gap:12px; margin-bottom:6px; flex-wrap:wrap; }
+    #thetacm-inputs label { font-size:12px; color:#555; }
+    #thetacm-inputs input { width:65px; }
+    table#thetaCMTable {
+      border-collapse:collapse; font-size:11px; min-width:700px;
+    }
+    table#thetaCMTable th {
+      background:#f5f7fa; border:1px solid #ddd; padding:3px 6px;
+      font-weight:bold; color:#444; white-space:nowrap; text-align:center;
+    }
+    table#thetaCMTable td {
+      border:1px solid #e8e8e8; padding:2px 5px;
+      text-align:center; font-family:monospace; font-size:11px; white-space:nowrap;
     }
   </style>
 </head>
@@ -114,6 +162,17 @@
         <span class="nuc-info" id="info-light">&mdash;</span>
       </div>
       <div class="ctrl-row" style="margin-top:5px;">
+        <label>B-field (T)</label>
+        <input type="range" id="sl-bfield" min="-5" max="0" value="-3" step="0.05"
+               oninput="syncSpinFromSlider('bfield');fullUpdate();">
+        <input type="number" class="spinbox" id="sp-bfield" value="-3"
+               min="-5" max="0" step="0.05"
+               oninput="syncSliderFromSpin('bfield');fullUpdate();">
+      </div>
+      <div class="ctrl-row" style="justify-content:flex-end;">
+        <span style="font-size:10px;color:#aaa;">T (-5..0)</span>
+      </div>
+      <div class="ctrl-row">
         <label>Beam E (MeV/u)</label>
         <input type="range" id="sl-energy" min="0.1" max="30" value="8.8" step="0.1"
                style="max-width:80px;" oninput="document.getElementById('inp-energy').value=parseFloat(this.value).toFixed(1);fullUpdate();">
@@ -129,6 +188,7 @@
       <div style="margin-top:6px;">
         <button onclick="loadFromServerFull()">&#8595; Load digios</button>
       </div>
+
       <div id="rx-info" style="margin-top:8px;font-size:11px;color:#333;line-height:1.7;">
         <div><b>Q-value:</b> <span id="rx-qval">—</span> MeV</div>
         <div><b>Min E:</b> <span id="rx-minE">—</span> MeV/u</div>
@@ -176,17 +236,6 @@
         <label>RDT outer (mm)</label>
         <input type="number" class="spinbox" id="inp-rdt-outer" value="40.2" min="1" max="500" step="0.5"
                oninput="fastRelayout();" style="width:55px;">
-      </div>
-      <div class="ctrl-row">
-        <label>B-field (T)</label>
-        <input type="range" id="sl-bfield" min="-5" max="0" value="-3" step="0.05"
-               oninput="syncSpinFromSlider('bfield');fullUpdate();">
-        <input type="number" class="spinbox" id="sp-bfield" value="-3"
-               min="-5" max="0" step="0.05"
-               oninput="syncSliderFromSpin('bfield');fullUpdate();">
-      </div>
-      <div class="ctrl-row" style="justify-content:flex-end;">
-        <span style="font-size:10px;color:#aaa;">T (-5..0)</span>
       </div>
     </div>
 
@@ -236,6 +285,62 @@
       </div>
     </div>
 
+    <div class="section" id="ptolemy-section">
+      <h3>Ptolemy DWBA</h3>
+      <div class="ctrl-row">
+        <label>Beam J<sup>&pi;</sup></label>
+        <input type="text" id="inp-jbiga" value="0+" style="width:48px;font-size:12px;" placeholder="e.g. 3/2-">
+        <button onclick="fetchBeamJpi()" title="Retrieve beam ground state Jπ from NDS" style="font-size:11px;padding:2px 5px;">&#128269;</button>
+        <span id="jbiga-status" style="font-size:10px;color:#888;"></span>
+      </div>
+      <div class="ctrl-row">
+        <label>&theta;<sub>min</sub> (deg)</label>
+        <input type="number" id="ptol-angmin" value="0" min="0" max="180" step="1" class="spinbox" style="width:50px;">
+      </div>
+      <div class="ctrl-row">
+        <label>&theta;<sub>max</sub> (deg)</label>
+        <input type="number" id="ptol-angmax" value="60" min="1" max="180" step="1" class="spinbox" style="width:50px;">
+      </div>
+      <div class="ctrl-row">
+        <label>&theta;<sub>step</sub> (deg)</label>
+        <input type="number" id="ptol-angstep" value="1" min="0.1" max="10" step="0.1" class="spinbox" style="width:50px;">
+      </div>
+      <button id="dwba-btn" onclick="runPtolemy()" style="width:100%;margin-top:6px;background:#e8f0fe;border:1px solid #1a73e8;color:#1a4f8a;border-radius:3px;padding:4px;font-size:12px;">&#9654; Run DWBA</button>
+      <button onclick="showInFiles()" style="width:100%;margin-top:3px;background:#f5f5f5;border:1px solid #ccc;color:#444;border-radius:3px;padding:3px;font-size:11px;">&#128196; Show .in file</button>
+      <div id="dwba-status" style="font-size:11px;color:#888;margin-top:4px;min-height:14px;"></div>
+    </div>
+
+    <div class="section" id="nds-section">
+      <h3>Nuclear Data Server</h3>
+      <div id="nds-box">
+        <div id="nds-status-row">
+          <div id="nds-dot"></div>
+          <input type="text" id="nds-url-inp" class="nuc-inp"
+                 style="width:100%;font-size:11px;"
+                 placeholder="http://host:port/sse"
+                 onchange="ndsUrlChanged()">
+        </div>
+        <div id="nds-err-msg" style="display:none;">&#9888; Unable to reach the MCP server</div>
+        <div id="nds-controls" style="display:none;">
+          <div class="ctrl-row">
+            <label style="width:56px;min-width:56px;">Isotope</label>
+            <input type="text" id="nds-iso" class="nuc-inp" style="width:70px;"
+                   placeholder="e.g. 12C">
+          </div>
+          <div class="ctrl-row">
+            <label style="width:56px;min-width:56px;">Ex max (MeV,<br>ENSDF)</label>
+            <input type="number" id="nds-exmax" class="spinbox" style="width:70px;"
+                   min="0" step="0.1" placeholder="optional">
+          </div>
+          <div style="display:flex;gap:4px;margin-top:2px;">
+            <button id="nds-retrieve-btn" onclick="ndsRetrieve()">&#128269; Retrieve</button>
+          </div>
+          <div id="nds-results" style="display:none;"></div>
+          <div id="nds-levels" style="display:none;"></div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <div id="right-area">
@@ -244,12 +349,17 @@
         <h3>Excitation Energies</h3>
         <button onclick="addRow()">+ Add</button>
         <button onclick="deleteRow()">&minus; Remove</button>
+
       </div>
       <table id="ExTable">
         <thead>
           <tr>
             <th>E<sub>x</sub> [MeV]</th>
             <th>&#952;<sub>CM</sub> [&#176;]</th>
+            <th>Orbital</th>
+            <th>J<sup>&pi;</sup></th>
+            <th>V<sub>in</sub></th>
+            <th>V<sub>out</sub></th>
             <th>E<sub>b</sub> [MeV]</th>
             <th>Z<sub>0b</sub> [mm]</th>
             <th>Z<sub>b</sub> [mm]</th>
@@ -266,6 +376,9 @@
           <tr>
             <td><input type="number" id="Ex1" value="0.000" step="0.001" oninput="scheduleUpdate()"></td>
             <td><input type="number" id="theta1" value="45" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
+            <td><input type="text" class="orb-inp" id="orb1" value="0s1/2" placeholder="0s1/2"></td>
+            <td><input type="text" class="orb-inp" id="jpi1" value="0+"></td>
+            <td id="potIn1-cell"></td><td id="potOut1-cell"></td>
             <td class="calc-cell" id="c1-Eb"></td><td class="calc-cell" id="c1-Zb0"></td>
             <td class="calc-cell" id="c1-Zb"></td><td class="calc-cell" id="c1-2rb"></td>
             <td class="calc-cell" id="c1-thb"></td><td class="calc-cell" id="c1-Tb"></td>
@@ -275,6 +388,9 @@
           <tr>
             <td><input type="number" id="Ex2" value="1.000" step="0.001" oninput="scheduleUpdate()"></td>
             <td><input type="number" id="theta2" value="45" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
+            <td><input type="text" class="orb-inp" id="orb2" value="0p3/2" placeholder="0p3/2"></td>
+            <td><input type="text" class="orb-inp" id="jpi2" value="2+"></td>
+            <td id="potIn2-cell"></td><td id="potOut2-cell"></td>
             <td class="calc-cell" id="c2-Eb"></td><td class="calc-cell" id="c2-Zb0"></td>
             <td class="calc-cell" id="c2-Zb"></td><td class="calc-cell" id="c2-2rb"></td>
             <td class="calc-cell" id="c2-thb"></td><td class="calc-cell" id="c2-Tb"></td>
@@ -284,6 +400,9 @@
           <tr>
             <td><input type="number" id="Ex3" value="2.000" step="0.001" oninput="scheduleUpdate()"></td>
             <td><input type="number" id="theta3" value="45" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
+            <td><input type="text" class="orb-inp" id="orb3" value="0p1/2" placeholder="0p1/2"></td>
+            <td><input type="text" class="orb-inp" id="jpi3" value="2-"></td>
+            <td id="potIn3-cell"></td><td id="potOut3-cell"></td>
             <td class="calc-cell" id="c3-Eb"></td><td class="calc-cell" id="c3-Zb0"></td>
             <td class="calc-cell" id="c3-Zb"></td><td class="calc-cell" id="c3-2rb"></td>
             <td class="calc-cell" id="c3-thb"></td><td class="calc-cell" id="c3-Tb"></td>
@@ -297,6 +416,41 @@
     <div id="plot-area">
       <div id="plot-ez"></div>
       <div id="plot-rz"></div>
+      <div id="plot-dwba" style="visibility:hidden;"></div>
+      <div id="plot-mc"  style="visibility:hidden;"></div>
+    </div>
+
+    <div id="thetacm-area">
+      <h3>&theta;<sub>CM</sub> Calculator</h3>
+      <div id="thetacm-inputs">
+        <label>E<sub>x</sub> (MeV)
+          <input type="number" id="tcm-ex" value="0" min="0" step="0.001"
+                 oninput="calThetaCM()">
+        </label>
+        <label>&theta;<sub>CM</sub> Gate (deg)
+          <input type="number" id="tcm-gate" value="10" min="0" max="180" step="0.5"
+                 oninput="calThetaCM()">
+        </label>
+        <label>X Gate (%)
+          <input type="number" id="tcm-xgate" value="95" min="0" max="100" step="1"
+                 oninput="calThetaCM()">
+        </label>
+      </div>
+      <table id="thetaCMTable">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>pos<sub>0</sub> (gated)</th>
+            <th>pos<sub>1</sub> (gated)</th>
+            <th>&theta;<sub>1</sub> (deg)</th>
+            <th>&theta;<sub>2</sub> (deg)</th>
+            <th>&theta;<sub>avg</sub> (deg)</th>
+            <th>&Delta;&theta; (deg)</th>
+            <th>sin(&theta;<sub>avg</sub>)&middot;&Delta;&theta;</th>
+          </tr>
+        </thead>
+        <tbody id="thetaCMTable-body"></tbody>
+      </table>
     </div>
   </div>
 </div>
@@ -355,6 +509,7 @@ let BField = -3.0;
 
 // Table row counter
 let rowCounter = 3;
+let _currentReaction = {};  // last built reaction JSON (for Ptolemy)
 
 // =====================================================================
 // SLIDER / SPINBOX SYNC
@@ -388,6 +543,7 @@ async function lookupNuc(role) {
       info.textContent = d.mass.toFixed(3) + ' MeV/c²';
       info.style.color = '#1a8a3a';
       if (nucCache.beam && nucCache.target && nucCache.light) computeHeavy();
+      refreshPotSelects();
       scheduleUpdate();
     } else {
       info.textContent = d.error || 'Not found';
@@ -825,6 +981,7 @@ function fullUpdate() {
   const _rzZmax = parseFloat(document.getElementById('inp-zmax')?.value||200);
   const _rzRmax = parseFloat(document.getElementById('inp-rmax')?.value||50);
   Plotly.relayout('plot-rz', { 'xaxis.range': [_rzZmin, _rzZmax], 'yaxis.range': [0, _rzRmax] });
+  calThetaCM();
 }
 
 // =====================================================================
@@ -854,6 +1011,9 @@ function addRow() {
   tr.innerHTML =
     '<td><input type="number" id="Ex' + id + '" value="' + randEx + '" step="0.001" oninput="scheduleUpdate()"></td>' +
     '<td><input type="number" id="theta' + id + '" value="' + randTheta + '" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>' +
+    '<td><input type="text" class="orb-inp" id="orb' + id + '" value="0p1/2" placeholder="0p1/2"></td>' +
+    '<td><input type="text" class="orb-inp" id="jpi' + id + '" value="0+"></td>' +
+    '<td id="potIn' + id + '-cell"></td><td id="potOut' + id + '-cell"></td>' +
     '<td class="calc-cell" id="c' + id + '-Eb"></td>' +
     '<td class="calc-cell" id="c' + id + '-Zb0"></td>' +
     '<td class="calc-cell" id="c' + id + '-Zb"></td>' +
@@ -865,6 +1025,7 @@ function addRow() {
     '<td class="calc-cell" id="c' + id + '-ZB0h"></td>' +
     '<td class="calc-cell" id="c' + id + '-2rB"></td>';
   tbody.appendChild(tr);
+  refreshPotSelects();
   scheduleUpdate();
 }
 
@@ -932,6 +1093,8 @@ async function loadFromServerFull() {
       const rbd = await rb.json();
       if (rbd.ok && rbd.reaction) {
         const rx = rbd.reaction;
+        _currentReaction = rx;
+        refreshPotSelects();
         // Populate nucCache from freshly computed values
         const EL_full = ELEMENT_SYMBOLS;
         const azLabel = heliosNuclideName;
@@ -975,6 +1138,240 @@ window.addEventListener('resize', () => {
 
 // =====================================================================
 // SAVE CONFIG
+// =====================================================================
+// Parse orbital notation e.g. "0p3/2" -> {nodes:0, l:1, j:"3/2"}
+// Format: [nodes][spdf letter][j as fraction or decimal]
+function parseOrbital(str) {
+  const L_MAP = {s:0, p:1, d:2, f:3, g:4, h:5, i:6, j:7};
+  const m = str.trim().match(/^(\d*)([spdfghij])(\d+(?:\/\d+|\.\d*)?)$/i);
+  if (!m) return {nodes:0, l:0, j:'1/2'};  // fallback
+  const nodes = m[1] !== '' ? parseInt(m[1]) : 0;
+  const l     = L_MAP[m[2].toLowerCase()] ?? 0;
+  const j     = m[3];  // keep as string e.g. "3/2" or "1.5"
+  return {nodes, l, j};
+}
+
+// Build a <select> for potential choice, with the auto-default highlighted
+// Potential catalog keyed by Cleopatra one-letter code
+// Groups: d=deuteron, p=proton, A3=mass-3 (3He/t), a=alpha, n=neutron
+const POT_CATALOG = [
+  // code, short label, particle group(s), full description
+  // ---- deuteron ----
+  ['A', 'An-Cai (d)',       ['d'],    'An & Cai (2006) E<183 | A>12'],
+  ['H', 'Han-Shi-Shen (d)', ['d'],    'Han, Shi, Shen (2006) E<200 | 12<A<209'],
+  ['B', 'Bojowald (d)',     ['d'],    'Bojowald (1988) 50<E<80 | A>27'],
+  ['D', 'Daehnick-R (d)',  ['d'],    'Daehnick (1980) REL 11.8<E<80 | A>27'],
+  ['C', 'Daehnick-NR (d)', ['d'],    'Daehnick (1980) NON-REL 11.8<E<80 | A>27'],
+  ['L', 'Lohr-Haeb (d)',   ['d'],    'Lohr & Haeberli (1974) 9<E<13 | A>40'],
+  ['Q', 'Perey-Perey (d)', ['d'],    'Perey & Perey (1963) 12<E<25 | A>40'],
+  ['Z', 'Zhang-Pang (d)',  ['d'],    'Zhang, Pang, Lou (2016) 5<E<170 | A<18'],
+  // ---- proton ----
+  ['K', 'Koning (p)',       ['p'],    'Koning & Delaroche (2009) E<200 | 24<A<209'],
+  ['V', 'Varner CH89 (p)', ['p'],    'Varner CH89 (1991) 16<E<65 | A<209'],
+  ['M', 'Menet (p)',        ['p'],    'Menet (1971) 30<E<60 | A>40'],
+  ['G', 'Becchetti (p)',   ['p'],    'Becchetti & Greenlees (1969) E<50 | A>40'],
+  ['P', 'Perey (p)',        ['p'],    'Perey (1963) E<20 | 30<A<100'],
+  // ---- A=3 (3He / t shared) ----
+  ['x', 'Xu (³He)',         ['3he'],  'Xu, Guo, Han, Shen (2011) E<250 | 20<A<209'],
+  ['l', 'Liang-Li-Cai',    ['3he','t'],'Liang, Li, Cai (2009) E<270 | all A'],
+  ['p', 'Pang (A=3)',       ['3he','t'],'Pang (2009) all E | isospin dep.'],
+  ['c', 'Li-Liang-Cai (t)',['t'],    'Li, Liang, Cai (2007) E<40 | 48<A<232 | tritons'],
+  ['t', 'Trost (t/³He)',   ['t','3he'],'Trost (1987) 10<E<220 | 10<A<208'],
+  ['h', 'Hyakutake (t)',   ['t'],    'Hyakutake (1980) 90<E<120 | 58<A<92'],
+  ['b', 'Becchetti (A=3)', ['3he','t'],'Becchetti & Greenlees (1971) E<40 | A>40'],
+  // ---- alpha ----
+  ['s', 'Su-Han (α)',       ['a'],    'Su & Han (2015) E<398 | 20<A<209'],
+  ['a', 'Avrigeanu (α)',   ['a'],    'Avrigeanu (2009)'],
+  ['f', 'Bassani-Picard (α)',['a'],   'Bassani & Picard (1969) 24<E<31 | A≈90'],
+  // ---- neutron / unknown ----
+  ['n', 'zero (n)',         ['n'],    'Zero potential (neutron)'],
+];
+
+function particleGroup(A, Z) {
+  if (A==1 && Z==0) return 'n';
+  if (A==1 && Z==1) return 'p';
+  if (A==2 && Z==1) return 'd';
+  if (A==3 && Z==1) return 't';
+  if (A==3 && Z==2) return '3he';
+  if (A==4 && Z==2) return 'a';
+  return 'n';
+}
+
+function autoCode(A, Z) {
+  const g = particleGroup(A, Z);
+  // default code per group (matches gen_input.py defaults)
+  const DEF = {p:'K', d:'A', t:'c', '3he':'x', a:'s', n:'n'};
+  return DEF[g] || 'n';
+}
+
+function makePotSelect(id, group, autoCode_) {
+  // Build option list: auto first, then all pots for this group, then others (greyed label)
+  const groupPots = POT_CATALOG.filter(r => r[2].includes(group));
+  const otherPots = POT_CATALOG.filter(r => !r[2].includes(group));
+  const autoEntry = POT_CATALOG.find(r => r[0] === autoCode_);
+  const autoLabel = autoEntry ? autoEntry[1] : autoCode_;
+
+  let html = `<select class="pot-sel" id="${id}" title="Optical potential">`;
+  html += `<option value="auto">auto (${autoLabel})</option>`;
+  if (groupPots.length) {
+    html += `<optgroup label="── ${group} ──">`;
+    for (const [code, lbl,, desc] of groupPots)
+      html += `<option value="${code}" title="${desc}">${lbl}</option>`;
+    html += '</optgroup>';
+  }
+  if (otherPots.length) {
+    html += `<optgroup label="── other ──">`;
+    for (const [code, lbl,, desc] of otherPots)
+      html += `<option value="${code}" title="${desc}">${lbl}</option>`;
+    html += '</optgroup>';
+  }
+  html += '</select>';
+  return html;
+}
+
+function refreshPotSelects() {
+  const rx = _currentReaction;
+  // Prefer live nucCache values (updated on every lookupNuc) over stale _currentReaction
+  const tgtA = parseInt((nucCache.target && nucCache.target.A) || rx.target_A   || 2);
+  const tgtZ = parseInt((nucCache.target && nucCache.target.Z) || rx.target_Z   || 1);
+  const ltA  = parseInt((nucCache.light  && nucCache.light.A)  || rx.recoil_light_A || 1);
+  const ltZ  = parseInt((nucCache.light  && nucCache.light.Z)  || rx.recoil_light_Z || 1);
+  const inGroup  = particleGroup(tgtA, tgtZ);
+  const outGroup = particleGroup(ltA,  ltZ);
+  const inAuto   = autoCode(tgtA, tgtZ);
+  const outAuto  = autoCode(ltA,  ltZ);
+
+  function populatePotCell(inEl, outEl, inId, outId) {
+    if (!inEl || !outEl) return;
+    const prevIn  = inEl.querySelector('select')  ? inEl.querySelector('select').value  : 'auto';
+    const prevOut = outEl.querySelector('select') ? outEl.querySelector('select').value : 'auto';
+    inEl.innerHTML  = makePotSelect(inId,  inGroup,  inAuto);
+    outEl.innerHTML = makePotSelect(outId, outGroup, outAuto);
+    const si = inEl.querySelector('select'), so = outEl.querySelector('select');
+    if ([...si.options].some(o => o.value === prevIn))  si.value = prevIn;
+    if ([...so.options].some(o => o.value === prevOut)) so.value = prevOut;
+  }
+
+  // Per-row selects in ExTable
+  const tbody = document.getElementById('ex-tbody');
+  let rowIdx = 1;
+  for (const row of tbody.rows) {
+    const rowId = row.dataset.rowid || rowIdx;
+    populatePotCell(
+      document.getElementById(`potIn${rowId}-cell`),
+      document.getElementById(`potOut${rowId}-cell`),
+      `potIn${rowId}`, `potOut${rowId}`
+    );
+    rowIdx++;
+  }
+}
+
+// =====================================================================
+// PTOLEMY DWBA
+async function runPtolemy() {
+  const btn    = document.getElementById('dwba-btn');
+  const status = document.getElementById('dwba-status');
+  btn.disabled = true;
+  status.textContent = 'Running…';
+
+  try {
+    // Collect states from ExTable rows
+    const tbody = document.getElementById('ex-tbody');
+    const states = [];
+    for (const row of tbody.rows) {
+      const cells = row.cells;
+      // Ex is in first cell input, l/j/nodes in next 3
+      const exInp    = cells[0].querySelector('input');
+      const orbInp   = cells[2].querySelector('input');
+      const jpiInp   = cells[3].querySelector('input');
+      const rowInSel = cells[4] ? cells[4].querySelector('select') : null;
+      const rowOutSel= cells[5] ? cells[5].querySelector('select') : null;
+      if (!exInp) continue;
+      const orb = parseOrbital(orbInp ? orbInp.value.trim() : '0s1/2');
+      states.push({
+        ex:         parseFloat(exInp.value) || 0,
+        l:          orb.l,
+        j:          orb.j,
+        nodes:      orb.nodes,
+        recoil_jpi: jpiInp ? jpiInp.value.trim() : '',
+        pot_in:     rowInSel  ? rowInSel.value  : 'auto',
+        pot_out:    rowOutSel ? rowOutSel.value : 'auto',
+      });
+    }
+
+    if (!states.length) { status.textContent = 'No rows.'; btn.disabled = false; return; }
+
+    // Collect reaction from current UI state
+    const reaction  = _currentReaction || {};
+    const jbiga     = document.getElementById('inp-jbiga').value.trim() || '0+';
+    const ang_min   = parseFloat(document.getElementById('ptol-angmin').value);
+    const ang_max   = parseFloat(document.getElementById('ptol-angmax').value);
+    const ang_step  = parseFloat(document.getElementById('ptol-angstep').value);
+    // pot_in/pot_out are already set per-row; 'auto' = let server/gen_input decide
+
+    const resp = await fetch('/api/ptolemy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reaction, states, jbiga,
+        angle_min: ang_min, angle_max: ang_max, angle_step: ang_step,
+      })
+    });
+    const d = await resp.json();
+    if (!d.ok) { status.textContent = '✗ ' + d.error; btn.disabled = false; return; }
+
+    // Store results+errors globally for Show .in file button
+    window._lastPtolemyResults = d.results || [];
+    window._lastPtolemyErrors  = d.errors  || [];
+
+    if (d.errors && d.errors.length) {
+      const msgs = d.errors.map(e => typeof e === 'object' ? e.msg : e);
+      status.textContent = '\u26a0 ' + msgs.join(' | ');
+    } else {
+      status.textContent = `\u2713 ${d.results.length} state(s) done`;
+    }
+
+    plotPtolemy(d.results, d.reaction, ang_min, ang_max);
+  } catch(e) {
+    status.textContent = '✗ ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function plotPtolemy(results, reactionLabel, ang_min, ang_max) {
+  if (!results || !results.length) return;
+
+  // Use global COLORS (same as EZ plot)
+  const traces = results.map((r, i) => ({
+    x: r.angles, y: r.xsec,
+    mode: 'lines',
+    name: `Ex=${r.ex.toFixed(3)} ${r.nodes}${['s','p','d','f','g','h'][r.l]||r.l}${r.j} Jπ=${r.recoil_jpi||'?'}`,
+    line: { color: COLORS[i % COLORS.length], width: 2 },
+  }));
+
+  const layout = {
+    title: { text: reactionLabel + ' DWBA', font: { size: 13 } },
+    paper_bgcolor: '#fff', plot_bgcolor: '#f9f9f9',
+    font: { color: '#222', family: 'Arial,sans-serif', size: 12 },
+    xaxis: { title: 'θ<sub>CM</sub> (deg)', range: [ang_min, ang_max],
+             mirror: 'allticks', linewidth: 1, gridcolor: '#ddd', zerolinecolor: '#bbb' },
+    yaxis: { title: 'dσ/dΩ (mb/sr)', type: 'log',
+             mirror: 'allticks', linewidth: 1, gridcolor: '#ddd', zerolinecolor: '#bbb' },
+    legend: { bgcolor: 'rgba(255,255,255,0.85)', font: { size: 11 },
+              xanchor: 'right', x: 0.99, yanchor: 'top', y: 0.99 },
+    margin: { l: 55, r: 15, t: 30, b: 45 },
+    dragmode: 'pan',
+  };
+
+  const dwbaEl = document.getElementById('plot-dwba');
+  dwbaEl.style.visibility = 'visible';
+  Plotly.react('plot-dwba', traces, layout,
+    { responsive: true, displayModeBar: true, displaylogo: false,
+      modeBarButtonsToRemove: ['lasso2d','select2d'] });
+  setTimeout(() => { try { Plotly.Plots.resize('plot-dwba'); } catch(e){} }, 100);
+}
+
 async function saveConfig() {
   const btn = document.getElementById('save-config-btn');
   const status = document.getElementById('save-status');
@@ -1012,6 +1409,509 @@ async function saveConfig() {
   }
 }
 
+// =====================================================================
+// θCM CALCULATOR  (ported from SOLARIS_Web_Simulation/heliosmatics2.js)
+
+function calZ(theta_deg, k_cm, qb) {
+  // Z position of light recoil after one cyclotron arc, at given θ_CM
+  const cs  = Math.cos(theta_deg * Math.PI / 180);
+  const ss  = Math.sin(theta_deg * Math.PI / 180);
+  const Zb0 = (gamma_cm * beta * qb - gamma_cm * k_cm * cs) / alpha;  // mm
+  const rho = k_cm * ss / c / (1 / (nucCache.light ? nucCache.light.mass / c : 1))
+              / Math.abs(BField) * 1000;  // placeholder — use formula below
+  // rho = p_perp / (q*B)  in mm;  p_perp = k_cm*sin(θ) [MeV/c], q in units of e
+  // Using: rho [mm] = k_cm*ss / (light_charge * |B| * c/1000)
+  //   c = 299.792468 mm/ns, so c/1000 = 0.299792468 mm/ns/MeV * ... 
+  // Exact form from heliosmatics2.js:
+  //   rho = k_cm * ss / c / light[1] / |B| * 1000
+  //   where light[1] = charge of light recoil (Z_b), c in mm/ns
+  const lightCharge = nucCache.light ? nucCache.light.Z : 1;
+  const rho2 = k_cm * ss / c / lightCharge / Math.abs(BField) * 1000;
+  return Zb0 * (1 - Math.sin(perpDist / 2 / rho2) / Math.PI);
+}
+
+function searchThetaCM(Z_pos, thetaMin, k_cm, qb) {
+  let step = 0.01;
+  for (let yy = thetaMin; yy < 180; yy += step) {
+    if (yy > 12) step = 0.1;
+    if (yy > 20) step = 0.5;
+    if (yy > 40) step = 1.0;
+    const z1 = calZ(yy,        k_cm, qb);
+    const z2 = calZ(yy + step, k_cm, qb);
+    if (z1 > z2) continue;  // still in bending range
+    if (Z_pos < z1) break;
+    if (z1 <= Z_pos && Z_pos <= z2) {
+      return (Z_pos - z1) / (z2 - z1) * step + yy;
+    }
+  }
+  return NaN;
+}
+
+function calThetaCM() {
+  const ex      = parseFloat(document.getElementById('tcm-ex').value)    || 0;
+  const angGate = parseFloat(document.getElementById('tcm-gate').value)  || 10;
+  const xGate   = parseFloat(document.getElementById('tcm-xgate').value) || 95;
+  const tbody   = document.getElementById('thetaCMTable-body');
+  tbody.innerHTML = '';
+
+  // Need full physics state — bail if not ready
+  if (!nucCache.light || !nucCache.heavy || !E_tot_cm || !alpha) return;
+
+  const mLight = nucCache.light.mass;
+  const mHeavy = nucCache.heavy.mass;
+
+  const haha1 = E_tot_cm * E_tot_cm - Math.pow(mHeavy + ex + mLight, 2);
+  const haha2 = E_tot_cm * E_tot_cm - Math.pow(mHeavy + ex - mLight, 2);
+  if (haha1 <= 0 || haha2 <= 0) return;  // below threshold
+  const k_cm = Math.sqrt(haha1 * haha2) / 2 / E_tot_cm;
+  const qb   = Math.sqrt(mLight * mLight + k_cm * k_cm);
+
+  // Build arrayPos from current geometry state
+  const arrayPosLocal = [];
+  const arrayZ = parseFloat(document.getElementById('sp-array').value) || 0;
+  for (let i = 0; i < nDet; i++) {
+    let p0, p1;
+    if (arrayZ < 0) {
+      p0 = arrayZ - (i + 1) * detLen - i * detGap;
+      p1 = arrayZ - i * detLen - i * detGap;
+    } else {
+      p0 = arrayZ + i * detLen + i * detGap;
+      p1 = arrayZ + (i + 1) * detLen + i * detGap;
+    }
+    // Use heliosPosOffsets if available (HELIOS geometry)
+    if (heliosPosOffsets && heliosPosOffsets.length > i) {
+      const off = heliosPosOffsets[i];
+      if (arrayZ < 0) {
+        p0 = arrayZ - heliosPosOffsets[i] - detLen;
+        p1 = arrayZ - heliosPosOffsets[i];
+      } else {
+        p0 = arrayZ + heliosPosOffsets[i];
+        p1 = arrayZ + heliosPosOffsets[i] + detLen;
+      }
+    }
+    arrayPosLocal.push([p0, p1]);
+  }
+
+  for (let i = 0; i < arrayPosLocal.length; i++) {
+    const p0 = arrayPosLocal[i][0];
+    const p1 = arrayPosLocal[i][1];
+    const gated0 = p0 + detLen * (100 - xGate) / 200 * Math.sign(arrayZ < 0 ? -1 : 1);
+    const gated1 = p1 - detLen * (100 - xGate) / 200 * Math.sign(arrayZ < 0 ? -1 : 1);
+
+    // For upstream array (arrayZ < 0), near edge is p1 (less negative), far is p0
+    const posNear = arrayZ < 0 ? p1 : p0;
+    const posFar  = arrayZ < 0 ? p0 : p1;
+    const gNear   = arrayZ < 0
+      ? p1 - detLen * (100 - xGate) / 200
+      : p0 + detLen * (100 - xGate) / 200;
+    const gFar    = arrayZ < 0
+      ? p0 + detLen * (100 - xGate) / 200
+      : p1 - detLen * (100 - xGate) / 200;
+
+    const a1 = searchThetaCM(gNear, angGate, k_cm, qb);
+    const a2 = searchThetaCM(gFar,  angGate, k_cm, qb);
+    const am = (a1 + a2) / 2;
+    const da = Math.abs(a2 - a1);
+    const solidAngle = (Math.sin(am * Math.PI / 180) * da * Math.PI / 180).toExponential(2);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${i}</td>
+      <td>${posNear.toFixed(1)} (${gNear.toFixed(1)})</td>
+      <td>${posFar.toFixed(1)} (${gFar.toFixed(1)})</td>
+      <td>${isNaN(a1) ? '—' : a1.toFixed(2)}</td>
+      <td>${isNaN(a2) ? '—' : a2.toFixed(2)}</td>
+      <td>${(isNaN(a1)||isNaN(a2)) ? '—' : am.toFixed(2)}</td>
+      <td>${(isNaN(a1)||isNaN(a2)) ? '—' : da.toFixed(2)}</td>
+      <td>${(isNaN(a1)||isNaN(a2)) ? '—' : solidAngle}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+// =====================================================================
+// NUCLEAR DATA SERVER (NDS)
+
+const NDS_SHORTHAND = {
+  'n':'1n','p':'1H','d':'2H','D':'2H','t':'3H','T':'3H',
+  'h':'3He','H':'3He','a':'4He','A':'4He','alpha':'4He',
+};
+
+function ndsResolveIso(raw) {
+  const s = raw.trim();
+  const resolved = NDS_SHORTHAND[s] || s;
+  const m = resolved.match(/^(\d+)([A-Za-z]+)$/);
+  if (!m) return null;
+  const A = parseInt(m[1]);
+  const sym = m[2];
+  const Z = ELEMENT_SYMBOLS.findIndex(el => el.toLowerCase() === sym.toLowerCase());
+  if (Z < 0) return null;
+  return { A, Z, name: A + ELEMENT_SYMBOLS[Z] };
+}
+
+async function ndsGet(tool, args) {
+  const qs = encodeURIComponent(JSON.stringify(args));
+  const r = await fetch(`/api/nds/query?tool=${tool}&args=${qs}`);
+  const d = await r.json();
+  if (!d.ok) throw new Error(d.error || 'NDS error');
+  return d.result;
+}
+
+function ndsFmt(val, unit='', digits=3) {
+  if (val === null || val === undefined) return '—';
+  return (typeof val === 'number' ? val.toFixed(digits) : val) + (unit ? '\u202f' + unit : '');
+}
+
+async function ndsCheckStatus(url) {
+  const dot = document.getElementById('nds-dot');
+  const errMsg = document.getElementById('nds-err-msg');
+  const controls = document.getElementById('nds-controls');
+  const urlInp = document.getElementById('nds-url-inp');
+  dot.className = '';
+  try {
+    const r = await fetch('/api/nds/status');
+    const d = await r.json();
+    if (d.reachable) {
+      dot.className = 'ok';
+      errMsg.style.display = 'none';
+      controls.style.display = 'flex';
+      urlInp.readOnly = true;
+      urlInp.style.background = '#f5f5f5';
+      urlInp.style.color = '#666';
+    } else {
+      dot.className = 'err';
+      errMsg.style.display = 'block';
+      controls.style.display = 'none';
+      urlInp.readOnly = false;
+      urlInp.style.background = '';
+      urlInp.style.color = '';
+    }
+  } catch(e) {
+    dot.className = 'err';
+    errMsg.style.display = 'block';
+    controls.style.display = 'none';
+  }
+}
+
+async function ndsUrlChanged() {
+  const url = document.getElementById('nds-url-inp').value.trim();
+  // Save to mcp.json via server
+  try {
+    await fetch('/api/mcp_config', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ nds_url: url })
+    });
+  } catch(e) {}
+  ndsCheckStatus(url);
+}
+
+function showInFiles() {
+  const results = window._lastPtolemyResults || [];
+  const errors  = window._lastPtolemyErrors  || [];
+  if (!results.length && !errors.length) {
+    alert('No DWBA run yet. Click Run DWBA first.'); return;
+  }
+
+  const popW = 700, popH = 560;
+  const left = Math.round(window.screenX + (window.outerWidth - popW) / 2);
+  const top  = Math.round(window.screenY + (window.outerHeight - popH) / 2);
+  const popup = window.open('', 'ptolemy_infile_' + Date.now(),
+    'width=' + popW + ',height=' + popH + ',left=' + left + ',top=' + top + ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no');
+  if (!popup) { alert('Popup blocked!'); return; }
+
+  function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  let html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Ptolemy .in files</title>'
+    + '<style>body{font-family:monospace;font-size:12px;background:#1e1e1e;color:#d4d4d4;margin:0;padding:8px}'
+    + 'h3{color:#9cdcfe;margin:8px 0 4px;font-size:13px}'
+    + 'pre{background:#252526;border:1px solid #3c3c3c;border-radius:4px;padding:8px;white-space:pre;overflow-x:auto;margin:0 0 12px}'
+    + '.err{color:#f48771}</style></head><body>';
+
+  for (const r of results) {
+    const L_NAMES = ['s','p','d','f','g','h'];
+    const label = 'Ex=' + r.ex.toFixed(3) + ' ' + r.nodes + (L_NAMES[r.l]||r.l) + r.j + ' J\u03c0=' + (r.recoil_jpi||'?');
+    html += '<h3>' + esc(label) + '</h3><pre>' + esc(r.in_file || '') + '</pre>';
+  }
+  for (const e of errors) {
+    const msg    = typeof e === 'object' ? e.msg    : e;
+    const infile = typeof e === 'object' ? e.in_file : '';
+    html += '<h3 class="err">\u26a0 ' + esc(msg) + '</h3>';
+    if (infile) html += '<pre>' + esc(infile) + '</pre>';
+  }
+
+  html += '</body></html>';
+  popup.document.write(html);
+  popup.document.close();
+}
+
+async function fetchBeamJpi() {
+  const st = document.getElementById('jbiga-status');
+  const beam = nucCache.beam;
+  if (!beam || !beam.A || beam.Z === undefined) {
+    st.textContent = 'load beam first'; return;
+  }
+  st.textContent = '...';
+  try {
+    const d = await ndsGet('nds_get_decay', { Z: beam.Z, A: beam.A });
+    const gs = Array.isArray(d) ? d.find(x => !x.excitation_energy_keV) : d;
+    const jp = gs && gs.spin_parity ? gs.spin_parity : null;
+    if (jp) {
+      document.getElementById('inp-jbiga').value = jp;
+      const el = document.getElementById('inp-jbiga');
+      el.style.background = '#d4edda';
+      setTimeout(() => { el.style.background = ''; }, 800);
+      st.textContent = jp;
+    } else {
+      st.textContent = 'not found';
+    }
+  } catch(e) {
+    st.textContent = 'error';
+  }
+}
+
+async function ndsRetrieve() {
+  const raw = document.getElementById('nds-iso').value.trim();
+  const exMaxRaw = document.getElementById('nds-exmax').value.trim();
+  const btn = document.getElementById('nds-retrieve-btn');
+  const resultsDiv = document.getElementById('nds-results');
+  const levelsDiv = document.getElementById('nds-levels');
+
+  const iso = ndsResolveIso(raw);
+  if (!iso) {
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = '<span style="color:#c0392b">Cannot parse isotope: ' + raw + '</span>';
+    levelsDiv.style.display = 'none';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  resultsDiv.style.display = 'block';
+  resultsDiv.innerHTML = '<span style="color:#888">Fetching from NDS...</span>';
+  levelsDiv.style.display = 'none';
+
+  try {
+    const { A, Z, name } = iso;
+
+    // Fire all base queries in parallel
+    const [massD, decayD, sepD, qvalD] = await Promise.all([
+      ndsGet('nds_get_mass',              { Z, A }),
+      ndsGet('nds_get_decay',             { Z, A }),
+      ndsGet('nds_get_separation_energy', { Z, A }),
+      ndsGet('nds_get_q_value',           { Z, A, type: 'Qa' }).catch(() => null),
+    ]);
+
+    // Ground state from decay array
+    const gs = Array.isArray(decayD) ? decayD.find(d => !d.excitation_energy_keV) : decayD;
+
+    // Format results
+    const sep = sepD || {};
+    const Sn  = sep.Sn  ? sep.Sn.value_keV  / 1000 : null;
+    const Sp  = sep.Sp  ? sep.Sp.value_keV  / 1000 : null;
+    const S2n = sep.S2n ? sep.S2n.value_keV / 1000 : null;
+    const S2p = sep.S2p ? sep.S2p.value_keV / 1000 : null;
+    const Sa  = (qvalD && qvalD.value_keV != null) ? -qvalD.value_keV / 1000 : null;
+
+    let html = `<b>${name}</b> &nbsp; Z=${Z}, A=${A}<br>`;
+    html += `<b>Mass excess:</b> ${ndsFmt(massD.mass_excess_keV, 'keV', 3)}`;
+    if (massD.mass_excess_unc_keV) html += ` &plusmn; ${ndsFmt(massD.mass_excess_unc_keV,'keV',3)}`;
+    html += `<br>`;
+    html += `<b>B.E./A:</b> ${ndsFmt(massD.binding_energy_per_A_keV,'keV',3)}<br>`;
+    html += `<b>Sn:</b> ${ndsFmt(Sn,'MeV',3)} &nbsp; <b>Sp:</b> ${ndsFmt(Sp,'MeV',3)}<br>`;
+    html += `<b>S2n:</b> ${ndsFmt(S2n,'MeV',3)} &nbsp; <b>S2p:</b> ${ndsFmt(S2p,'MeV',3)}<br>`;
+    html += `<b>Sα:</b> ${ndsFmt(Sa,'MeV',3)}<br>`;
+    if (gs) {
+      html += `<b>J&pi;:</b> ${gs.spin_parity || '\u2014'} &nbsp; `;
+      html += `<b>T&frac12;:</b> ${gs.half_life || '\u2014'}<br>`;
+      html += `<b>Decay:</b> ${gs.decay_modes || 'stable'}`;
+
+    }
+    resultsDiv.innerHTML = html;
+
+    // Levels if Ex max is set
+    if (exMaxRaw !== '') {
+      const exMaxMeV = parseFloat(exMaxRaw);
+      const levD = await ndsGet('nds_query_levels', {
+        Z, A,
+        energy_max: exMaxMeV * 1000,
+        include_decay_datasets: false,
+        limit: 200,
+      });
+      const levels = Array.isArray(levD)
+        ? levD.filter(l => l.source === 'ENSDF')
+        : [];
+
+      if (levels.length === 0) {
+        levelsDiv.style.display = 'block';
+        levelsDiv.innerHTML = '<div style="padding:4px 6px;color:#888;font-size:11px;">No ENSDF levels found below ' + exMaxMeV + ' MeV</div>';
+      } else {
+        let tbl = '<table><thead><tr><th>Ex (keV)</th><th>J&pi;</th><th>T&frac12;</th></tr></thead><tbody>';
+        for (const lv of levels) {
+          const ex = lv.energy_keV !== null ? Number(lv.energy_keV).toFixed(2) : '?';
+          const jp = lv.spin_parity || '\u2014';
+          const hl = lv.half_life || '\u2014';
+          tbl += `<tr><td>${ex}</td><td>${jp}</td><td>${hl}</td></tr>`;
+        }
+        tbl += '</tbody></table>';
+        levelsDiv.style.display = 'block';
+        levelsDiv.innerHTML = tbl;
+        // Open level plot popup
+        plotNdsLevels(levels, iso.name, { Sn, Sp, Sa });
+      }
+    }
+
+  } catch(e) {
+    resultsDiv.innerHTML = '<span style="color:#c0392b">Error: ' + e.message + '</span>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '\uD83D\uDD0D Retrieve';
+  }
+}
+
+function plotNdsLevels(levels, nuclideName, sepEnergies) {
+  const { Sn=null, Sp=null, Sa=null } = sepEnergies || {};
+  // Build energy + jpi arrays from ENSDF levels
+  const energy = levels.map(l => Number(l.energy_keV) / 1000);  // MeV
+  const jpi    = levels.map(l => l.spin_parity || '');
+
+  const plotWidth  = 320;
+  const plotHeight = 580;
+  const yMin   = -0.5;
+  const maxEx  = Math.max(...energy);
+  const yMax   = maxEx + 1.5;
+  const yRange = yMax - yMin;
+  const fontSize    = 13;
+  const fontSizeMeV = fontSize / plotHeight * yRange;  // label height in MeV units
+
+  // Anti-overlap: spread label y-positions
+  let ypos = energy.slice();
+  let noOverlap = false, loop = 0;
+  const l = energy.length;
+  while (!noOverlap && loop < 2 * l) {
+    for (let i = 1; i < l; i++) {
+      const diff = ypos[i] - ypos[i - 1];
+      if (diff < fontSizeMeV) {
+        ypos[i - 1] += (diff - fontSizeMeV) / 2;
+        ypos[i]     += (fontSizeMeV - diff) / 2;
+        if (ypos[i - 1] < yMin + fontSizeMeV / 2) {
+          ypos[i - 1] = yMin + fontSizeMeV / 2;
+          ypos[i]     = ypos[i - 1] + fontSizeMeV;
+        }
+      }
+    }
+    let count = 0;
+    for (let i = 1; i < l; i++) { if (ypos[i] - ypos[i-1] >= fontSizeMeV) count++; }
+    if (count === l - 1) noOverlap = true;
+    loop++;
+  }
+
+  // Build Plotly traces + annotations
+  const data = [];
+  const annotations = [];
+
+  for (let i = 0; i < l; i++) {
+    // Horizontal level line
+    data.push({ x:[0,1], y:[energy[i],energy[i]],
+      mode:'lines', line:{color:'#222', width:1.2} });
+    // Leader line: level → label
+    data.push({ x:[1.04, 1.12, 1.22], y:[energy[i], ypos[i], ypos[i]],
+      mode:'lines', line:{color:'#999', width:0.8} });
+    // Label annotation
+    annotations.push({
+      x: 1.23, y: ypos[i],
+      text: `${energy[i].toFixed(3)}&nbsp;&nbsp;${jpi[i]}`,
+      xanchor:'left', yanchor:'middle',
+      font:{size: fontSize, color:'#222', family:'monospace'},
+      showarrow: false
+    });
+  }
+
+  // Separation energy lines
+  const sepLines = [
+    { val: Sn, color: '#1a73e8', label: 'Sn' },
+    { val: Sp, color: '#d32f2f', label: 'Sp' },
+    { val: Sa, color: '#e91e8c', label: 'Sα' },
+  ];
+  for (const { val, color, label } of sepLines) {
+    if (val === null || val < yMin || val > yMax) continue;
+    data.push({ x: [-0.1, 1.0], y: [val, val],
+      mode: 'lines', line: { color, width: 1.5 },
+      showlegend: false });
+    annotations.push({
+      x: -0.08, y: val,
+      text: `<b>${label}</b> ${val.toFixed(3)}`,
+      xanchor: 'right', yanchor: 'middle',
+      font: { size: 11, color, family: 'Arial' },
+      showarrow: false
+    });
+  }
+
+  // Nuclide name at top — parse AEl → superscript
+  const nm = nuclideName.match(/^(\d+)([A-Za-z]+)$/);
+  const nameText = nm ? `<sup>${nm[1]}</sup>${nm[2]}` : nuclideName;
+  annotations.push({
+    x: 0.5, y: yMax - 0.3,
+    text: nameText,
+    font:{size: 28, color:'#111'},
+    showarrow: false
+  });
+
+  const layout = {
+    paper_bgcolor:'#ffffff', plot_bgcolor:'#ffffff',
+    width: plotWidth, height: plotHeight,
+    margin:{l:10, r:10, t:10, b:10},
+    showlegend: false,
+    xaxis:{ visible:false, range:[-1.6, 3.2] },
+    yaxis:{ visible:false, range:[yMin, yMax] },
+    annotations
+  };
+
+  // Serialise to JSON for the popup
+  const payload = JSON.stringify({ data, layout });
+
+  // Open browser popup centered on parent window
+  const popW = plotWidth + 40, popH = plotHeight + 40;
+  const left = Math.round(window.screenX - popW);
+  const top  = Math.round(window.screenY);
+  const popup = window.open('', `nds_levels_plot_${Date.now()}`,
+    `width=${popW},height=${popH},left=${left},top=${top},resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no`);
+  if (!popup) {
+    alert('Popup blocked! Please allow popups for this page.');
+    return;
+  }
+
+  const plotlyOrigin = window.location.origin;
+  popup.document.write(`<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<title>${nuclideName} Levels (ENSDF)</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#fff; font-family:Arial,sans-serif; }
+  #title { text-align:center; padding:6px 0 0; font-size:13px; color:#555; }
+</style>
+</head><body>
+<div id="title">ENSDF levels &mdash; ${nuclideName}</div>
+<div id="plot"></div>
+<script src="${plotlyOrigin}/plotly.min.js"><\/script>
+<script>
+  const p = ${payload};
+  Plotly.newPlot('plot', p.data, p.layout, {displayModeBar:true, displaylogo:false, modeBarButtonsToKeep:['toImage']});
+<\/script>
+</body></html>`);
+  popup.document.close();
+}
+
+async function ndsInit() {
+  // Load saved URL from server
+  try {
+    const r = await fetch('/api/mcp_config');
+    const d = await r.json();
+    if (d.nds_url) document.getElementById('nds-url-inp').value = d.nds_url;
+  } catch(e) {}
+  ndsCheckStatus();
+}
+
 // INIT
 window.addEventListener('load', () => {
   // Set rowid on initial rows (created in HTML without data-rowid)
@@ -1019,7 +1919,9 @@ window.addEventListener('load', () => {
   Array.from(tbody.rows).forEach((tr, i) => {
     if (!tr.dataset.rowid) tr.dataset.rowid = i + 1;
   });
+  refreshPotSelects();
   loadFromServerFull();
+  ndsInit();
 
 });
 </script>
