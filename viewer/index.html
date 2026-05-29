@@ -386,9 +386,17 @@ function sampleHelixPoints(track, zLimit, nSteps) {
   const tTotal = zLimit / vz; // positive when vz and zLimit have same sign
   if (!isFinite(tTotal) || tTotal <= 0) return [];
   const dt = tTotal / nSteps;
+  // Precompute per-step constants to avoid redundant multiply inside helixPointT
+  const omegaDt = omega * dt;
+  const Bsign = track.Bsign, phi0 = track.phi0, rho = track.rho, vzSigned = track.vz;
   const pts = [];
   for (let i = 0; i <= nSteps; i++) {
-    pts.push(track.helixPointT(i * dt));
+    const angle = omegaDt * i;
+    pts.push({
+      x: rho * (Math.sin(angle - Bsign * phi0) + Bsign * Math.sin(phi0)),
+      y: rho * (Bsign * Math.cos(angle - Bsign * phi0) - Bsign * Math.cos(phi0)),
+      z: vzSigned * dt * i,
+    });
   }
   return pts;
 }
@@ -397,13 +405,21 @@ function sampleHelixPoints(track, zLimit, nSteps) {
 function sampleHelixPointsZ(track, zEnd, nSteps) {
   const vz = track.vz;
   if (Math.abs(vz) < 0.001) return [];
-  const pts = [];
   const dz = zEnd / nSteps;
+  const invVz = 1 / vz;
+  const omega = track.omega;
+  const Bsign = track.Bsign, phi0 = track.phi0, rho = track.rho;
+  const pts = [];
   for (let i = 0; i <= nSteps; i++) {
     const z = i * dz;
-    const t = z / vz; // time to reach this z
+    const t = z * invVz;
     if (!isFinite(t)) break;
-    pts.push(track.helixPointT(t));
+    const angle = omega * t;
+    pts.push({
+      x: rho * (Math.sin(angle - Bsign * phi0) + Bsign * Math.sin(phi0)),
+      y: rho * (Bsign * Math.cos(angle - Bsign * phi0) - Bsign * Math.cos(phi0)),
+      z,
+    });
   }
   return pts;
 }
@@ -452,6 +468,9 @@ let tubeGroup = null; // support tube group (panels + wireframe)
 
 const ROW_COLORS = [0x58a6ff,0xff7b72,0x79c0ff,0xffa657]; // 4 sides
 const COL_COLORS = [0xff4444,0xff8c00,0xffd700,0x44ff88,0x44aaff,0xcc44ff]; // 6 z-positions
+// Cached colors for per-frame use — avoid allocating new THREE.Color every frame
+const _EMISSIVE_BLACK  = new THREE.Color(0, 0, 0);
+const _EMISSIVE_HOVER  = new THREE.Color(0.3, 0.3, 0.0);
 
 function getDetColor(det) {
   const mode = document.getElementById('color-mode').value;
@@ -483,8 +502,9 @@ function autoPositionMagnet(geo) {
   buildBeamArrow();
   // Reposition camera to array center
   if (typeof controls !== 'undefined' && typeof camera !== 'undefined') {
-    const zMin = geo.zMin || fp - arrayLen;
-    const zMax = geo.zMax || fp;
+    const fp = geo.firstPos || 0;
+    const zMin = geo.zMin !== undefined ? geo.zMin : fp;
+    const zMax = geo.zMax !== undefined ? geo.zMax : fp;
     const cz = (zMin + zMax) / 2;
     const vd = Math.max(300, Math.abs(zMax - zMin) * 1.5);
     controls.target.set(0, 0, cz);
@@ -493,8 +513,19 @@ function autoPositionMagnet(geo) {
   }
 }
 
+function disposeGroup(group) {
+  if (!group) return;
+  group.traverse(obj => {
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      if (obj.material.map) obj.material.map.dispose();
+      obj.material.dispose();
+    }
+  });
+}
+
 function buildTarget() {
-  if (targetGroup) scene.remove(targetGroup);
+  if (targetGroup) { disposeGroup(targetGroup); scene.remove(targetGroup); }
   targetGroup = new THREE.Group();
   const label = getLabelFromRxField('rx-tgt-A', 'rx-tgt-Z', '2H');
   const color = 0xffdd44; // gold
@@ -510,10 +541,12 @@ function buildTarget() {
   targetGroup.add(disk);
 
   // Thin ring outline
+  const _ringCylGeo = new THREE.CylinderGeometry(radius, radius, thickness, 64, 1, true);
   const ring = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.CylinderGeometry(radius, radius, thickness, 64, 1, true)),
+    new THREE.EdgesGeometry(_ringCylGeo),
     new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
   );
+  _ringCylGeo.dispose(); // source geometry no longer needed after EdgesGeometry is built
   ring.rotation.x = Math.PI / 2;
   targetGroup.add(ring);
 
@@ -543,37 +576,10 @@ function getLabelFromRxField(aFieldId, zFieldId, fallback) {
 
 function makeNuclideLabel(rawLabel, colorHex) {
   return heliosMakeNuclideCanvas(rawLabel, colorHex);
-  // Parse "32Si" -> A="32", sym="Si"; render as superscript A + symbol
-  const match = rawLabel.match(/^(\d+)([A-Za-z]+)$/);
-  const canvas = document.createElement('canvas');
-  canvas.width = 256; canvas.height = 96;
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height); // transparent background
-  ctx.fillStyle = colorHex;
-  if (match) {
-    const A = match[1], sym = match[2];
-    // Symbol in large font
-    ctx.font = 'Bold 60px Courier New';
-    ctx.textAlign = 'left';
-    const symW = ctx.measureText(sym).width;
-    const totalW = 36 + symW; // 36px for superscript A
-    const xOff = (256 - totalW) / 2;
-    // Superscript A (smaller, raised)
-    ctx.font = 'Bold 36px Courier New';
-    ctx.fillText(A, xOff, 44);
-    // Symbol
-    ctx.font = 'Bold 60px Courier New';
-    ctx.fillText(sym, xOff + 36, 80);
-  } else {
-    ctx.font = 'Bold 56px Courier New';
-    ctx.textAlign = 'center';
-    ctx.fillText(rawLabel, 128, 72);
-  }
-  return canvas;
 }
 
 function buildBeamArrow() {
-  if (beamArrowGroup) scene.remove(beamArrowGroup);
+  if (beamArrowGroup) { disposeGroup(beamArrowGroup); scene.remove(beamArrowGroup); }
   beamArrowGroup = new THREE.Group();
   const label = getLabelFromRxField('rx-beam-A', 'rx-beam-Z', '32Si');
   const color  = 0x00eeff;
@@ -837,10 +843,25 @@ function setEventInfo(html, color) {
   }
 }
 
+function disposeAnim(anim) {
+  if (!anim) return;
+  [anim.line, anim.dotMesh, anim.flashMesh].forEach(obj => {
+    if (!obj) return;
+    trackGroup.remove(obj);
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) obj.material.dispose();
+  });
+}
+
 function clearTracks() {
   animations = [];
   eventHistory = [];
-  while (trackGroup.children.length) trackGroup.remove(trackGroup.children[0]);
+  while (trackGroup.children.length) {
+    const obj = trackGroup.children[0];
+    trackGroup.remove(obj);
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) obj.material.dispose();
+  }
   setEventInfo('', '');
 }
 
@@ -851,10 +872,8 @@ function pruneOldTracks() {
     const old = eventHistory.shift();
     [old.lightAnim, old.heavyAnim].forEach(anim => {
       if (anim) {
-        trackGroup.remove(anim.line);
-        trackGroup.remove(anim.dotMesh);
-        trackGroup.remove(anim.flashMesh);
         animations = animations.filter(a => a !== anim);
+        disposeAnim(anim);
       }
     });
   }
@@ -1006,11 +1025,9 @@ function generateEvent(autoMode = false) {
   const heavyZMax = Math.max(GEO.recoilPos + 100, zMagMax + 100);
   const ptsHeavy = sampleHelixPointsZ(trackB_heavy, heavyZMax, 600); // ~2mm steps
 
-  // Debug info
-  const dbg = `vz_b=${trackB_light.vz.toFixed(1)} zLim=${lightZLimit.toFixed(0)} N=${nLight} pts=${ptsLight.length} | vz_B=${trackB_heavy.vz.toFixed(1)} zMax=${heavyZMax.toFixed(0)} pts=${ptsHeavy.length}`;
-  console.log('[gen]', dbg);
-
+  // Debug info (only built when actually needed for error path)
   if (ptsLight.length < 2 || ptsHeavy.length < 2) {
+    const dbg = `vz_b=${trackB_light.vz.toFixed(1)} zLim=${lightZLimit.toFixed(0)} N=${nLight} pts=${ptsLight.length} | vz_B=${trackB_heavy.vz.toFixed(1)} zMax=${heavyZMax.toFixed(0)} pts=${ptsHeavy.length}`;
     setEventInfo('No track: ' + dbg, '#ff7b72');
     return;
   }
@@ -1105,8 +1122,10 @@ function generateEvent(autoMode = false) {
 }
 
 // Step the animation each frame
+const _animSpeedEl = (typeof document !== 'undefined') ? document.getElementById('anim-speed') : null;
 function stepAnimations() {
-  const speed = parseInt(document.getElementById('anim-speed').value);
+  // Cached DOM ref — avoids 60Hz getElementById lookups
+  const speed = parseInt((_animSpeedEl || document.getElementById('anim-speed')).value, 10);
   animations.forEach(anim => {
     if (anim.done) {
       // Flash decay
@@ -1145,14 +1164,19 @@ function stepAnimations() {
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 let hoveredMesh = null;
+let _mouseDirty = false;   // only raycast when mouse actually moved
 
 window.addEventListener('mousemove', e => {
   mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  _mouseDirty = true;
 });
 
 function checkHover() {
   if (!GEO || !detMeshes.length) return;
+  // Skip per-frame raycasting when mouse hasn't moved — huge CPU win at idle
+  if (!_mouseDirty && hoveredMesh === null) return;
+  _mouseDirty = false;
   raycaster.setFromCamera(mouse, camera);
   const hits = raycaster.intersectObjects(detMeshes);
   const tt = document.getElementById('tooltip');
@@ -1160,8 +1184,8 @@ function checkHover() {
     const mesh = hits[0].object;
     const det = mesh.userData.det;
     if (hoveredMesh !== mesh) {
-      if (hoveredMesh) hoveredMesh.material.emissive = new THREE.Color(0,0,0);
-      mesh.material.emissive = new THREE.Color(0.3,0.3,0.0);
+      if (hoveredMesh) hoveredMesh.material.emissive.copy(_EMISSIVE_BLACK);
+      mesh.material.emissive.copy(_EMISSIVE_HOVER);
       hoveredMesh = mesh;
     }
     document.getElementById('tt-id').textContent = `Det ${det.id.toString().padStart(2,'0')}`;
@@ -1172,7 +1196,7 @@ function checkHover() {
     document.getElementById('tt-z').textContent = det.z_center.toFixed(1) + ' mm';
     tt.style.display = 'block';
   } else {
-    if (hoveredMesh) { hoveredMesh.material.emissive = new THREE.Color(0,0,0); hoveredMesh = null; }
+    if (hoveredMesh) { hoveredMesh.material.emissive.copy(_EMISSIVE_BLACK); hoveredMesh = null; }
     tt.style.display = 'none';
   }
 }
@@ -1273,9 +1297,11 @@ window.addEventListener('resize', () => {
 // MAIN LOOP
 // ═══════════════════════════════════════════════════════════════════
 let autoRotAngle = 0;
+const _rotSpeedEl = document.getElementById('rotate-speed');
 function animate() {
   requestAnimationFrame(animate);
-  const speed = parseInt(document.getElementById('rotate-speed').value);
+  // Cached DOM ref — avoids 60Hz getElementById lookups
+  const speed = parseInt(_rotSpeedEl.value, 10);
   if (speed !== 0) {
     // Orbit camera around Y-axis, pivoting at controls.target
     const tx = controls.target.x, tz = controls.target.z;
@@ -1286,12 +1312,10 @@ function animate() {
       const angle = Math.atan2(dx, dz) + speed * 0.0002;
       camera.position.x = tx + r * Math.sin(angle);
       camera.position.z = tz + r * Math.cos(angle);
-      // Don't call lookAt — let OrbitControls handle camera orientation
-      controls.update();
     }
   }
   stepAnimations();
-  controls.update();
+  controls.update(); // single update per frame covers both rotation and damping
   checkHover();
   renderer.render(scene, camera);
 }

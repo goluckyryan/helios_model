@@ -6,6 +6,37 @@ Serves static files + API endpoints.
 
 import http.server, json, os, socketserver, subprocess, sys, threading, urllib.request, urllib.error
 
+# Single source of truth — element symbols indexed by Z (Z=0 sentinel for neutron in some contexts)
+# Used by parse_reaction_config, /api/ptolemy reaction string, and mass-table lookups.
+ELEMENT_SYMBOLS = [
+    'n','H','He','Li','Be','B','C','N','O','F','Ne',
+    'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
+    'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',
+    'Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr',
+    'Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn',
+    'Sb','Te','I','Xe','Cs','Ba','La','Ce','Pr','Nd',
+]
+def sym_for_Z(Z):
+    Z = int(Z)
+    return ELEMENT_SYMBOLS[Z] if 0 <= Z < len(ELEMENT_SYMBOLS) else f'Z{Z}'
+
+# ── Mass table cache — parsed once at startup, reused for all /api/mass calls ──
+_MASS_CACHE = None
+_MASS_PATH  = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mass20.txt'))
+
+def _get_masses():
+    """Return cached AME mass dict, parsing the table on first call. Returns None if missing."""
+    global _MASS_CACHE
+    if _MASS_CACHE is not None:
+        return _MASS_CACHE
+    if not os.path.exists(_MASS_PATH):
+        return None
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from build_reaction import parse_mass_table
+    _MASS_CACHE = parse_mass_table(_MASS_PATH)
+    return _MASS_CACHE
+
 PORT = 8765
 DIR  = os.path.dirname(os.path.abspath(__file__))
 
@@ -16,7 +47,6 @@ MCP_JSON            = os.path.join(os.path.dirname(DIR), 'mcp.json')
 DEFAULT_NDS_URL     = 'http://192.168.203.75:65432/sse'
 BUILD_REACTION_PY    = os.path.join(os.path.dirname(DIR), 'build_reaction.py')
 DETECTOR_GEO   = os.path.join(DIGIOS_WORKING, 'detectorGeo.txt')
-REACTION_DAT   = os.path.join(DIGIOS_WORKING, 'reaction.dat')
 REACTION_CFG   = os.path.join(DIGIOS_WORKING, 'reactionConfig.txt')
 BUILD_GEO_PY   = os.path.join(os.path.dirname(DIR), 'build_geometry.py')
 GEO_JSON       = os.path.join(os.path.dirname(DIR), 'helios_geometry.json')
@@ -100,45 +130,52 @@ def mcp_tool_call(nds_url, tool_name, arguments, timeout=15):
     t = threading.Thread(target=sse_reader, args=(sse_resp,), daemon=True)
     t.start()
 
-    # Wait for session endpoint
-    if not ready_evt.wait(timeout=5):
-        raise RuntimeError('Timed out waiting for SSE endpoint')
-    if sse_error:
-        raise RuntimeError(sse_error[0])
+    try:
+        # Wait for session endpoint
+        if not ready_evt.wait(timeout=5):
+            raise RuntimeError('Timed out waiting for SSE endpoint')
+        if sse_error:
+            raise RuntimeError(sse_error[0])
 
-    def post(payload):
-        url = base + endpoint_path
-        data = json.dumps(payload).encode()
-        req = urllib.request.Request(url, data=data,
-            headers={'Content-Type': 'application/json'}, method='POST')
-        with urllib.request.urlopen(req, timeout=5) as r:
-            return r.status
+        def post(payload):
+            url = base + endpoint_path
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request(url, data=data,
+                headers={'Content-Type': 'application/json'}, method='POST')
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status
 
-    # MCP handshake
-    post({'jsonrpc':'2.0','id':0,'method':'initialize',
-          'params':{'protocolVersion':'2024-11-05',
-                    'capabilities':{},'clientInfo':{'name':'helios-model','version':'1.0'}}})
-    time.sleep(0.1)
-    post({'jsonrpc':'2.0','method':'notifications/initialized'})
-    time.sleep(0.1)
+        # MCP handshake
+        post({'jsonrpc':'2.0','id':0,'method':'initialize',
+              'params':{'protocolVersion':'2024-11-05',
+                        'capabilities':{},'clientInfo':{'name':'helios-model','version':'1.0'}}})
+        time.sleep(0.1)
+        post({'jsonrpc':'2.0','method':'notifications/initialized'})
+        time.sleep(0.1)
 
-    # Tool call
-    post({'jsonrpc':'2.0','id':1,'method':'tools/call',
-          'params':{'name': tool_name, 'arguments': arguments}})
+        # Tool call
+        post({'jsonrpc':'2.0','id':1,'method':'tools/call',
+              'params':{'name': tool_name, 'arguments': arguments}})
 
-    # Wait for result on SSE stream
-    if not result_event.wait(timeout=10):
-        raise RuntimeError('Timed out waiting for tool result')
+        # Wait for result on SSE stream
+        if not result_event.wait(timeout=10):
+            raise RuntimeError('Timed out waiting for tool result')
 
-    # Find the response with id=1
-    for msg in messages:
-        if msg.get('id') == 1:
-            content = msg.get('result', {}).get('content', [])
-            if content and content[0].get('type') == 'text':
-                return json.loads(content[0]['text'])
-            if 'error' in msg:
-                raise RuntimeError(msg['error'].get('message', str(msg['error'])))
-    raise RuntimeError('No result message received')
+        # Find the response with id=1
+        for msg in messages:
+            if msg.get('id') == 1:
+                content = msg.get('result', {}).get('content', [])
+                if content and content[0].get('type') == 'text':
+                    return json.loads(content[0]['text'])
+                if 'error' in msg:
+                    raise RuntimeError(msg['error'].get('message', str(msg['error'])))
+        raise RuntimeError('No result message received')
+    finally:
+        # Always close the SSE stream — unblocks the reader thread and releases the FD
+        try: sse_resp.close()
+        except Exception: pass
+        # Give the reader a moment to exit cleanly
+        t.join(timeout=1.0)
 
 def parse_detgeo(path):
     """Parse detectorGeo.txt into a dict."""
@@ -188,26 +225,6 @@ def parse_detgeo(path):
             result['zMax'] = first + det_pos[-1] + length
     return result
 
-def parse_reaction(path):
-    """Parse reaction.dat into a dict."""
-    keys = ['mass_b', 'charge_b', 'betaCM', 'Ecm', 'mass_B', 'alpha']
-    values = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            tok = line.split()[0]
-            values.append(tok)
-    result = {}
-    for i, k in enumerate(keys):
-        if i < len(values):
-            try:
-                result[k] = float(values[i])
-            except ValueError:
-                result[k] = values[i]
-    return result
-
 def parse_reaction_config(path):
     """Parse reactionConfig.txt into a dict."""
     keys = [
@@ -232,27 +249,11 @@ def parse_reaction_config(path):
                 result[k] = float(values[i])
             except ValueError:
                 result[k] = values[i]
-    # Derived: beam label e.g. "32Si"
+    # Derived: beam/target/recoil labels e.g. "32Si"
     if 'beam_A' in result and 'beam_Z' in result:
-        element_symbols = [
-            '', 'H','He','Li','Be','B','C','N','O','F','Ne',
-            'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
-            'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',
-            'Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr',
-            'Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn',
-            'Sb','Te','I','Xe','Cs','Ba','La','Ce','Pr','Nd',
-        ]
-        A = int(result['beam_A']); Z = int(result['beam_Z'])
-        sym = element_symbols[Z] if Z < len(element_symbols) else f'Z{Z}'
-        result['beam_label'] = f'{A}{sym}'
-        # Also target label
-        At = int(result.get('target_A', 2)); Zt = int(result.get('target_Z', 1))
-        symt = element_symbols[Zt] if Zt < len(element_symbols) else f'Z{Zt}'
-        result['target_label'] = f'{At}{symt}'
-        # Light recoil label
-        Al = int(result.get('recoil_light_A', 1)); Zl = int(result.get('recoil_light_Z', 1))
-        syml = element_symbols[Zl] if Zl < len(element_symbols) else f'Z{Zl}'
-        result['recoil_light_label'] = f'{Al}{syml}'
+        A = int(result['beam_A']);  Z  = int(result['beam_Z']);   result['beam_label']         = f'{A}{sym_for_Z(Z)}'
+        At = int(result.get('target_A', 2)); Zt = int(result.get('target_Z', 1));        result['target_label']       = f'{At}{sym_for_Z(Zt)}'
+        Al = int(result.get('recoil_light_A', 1)); Zl = int(result.get('recoil_light_Z', 1)); result['recoil_light_label'] = f'{Al}{sym_for_Z(Zl)}'
     return result
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -264,19 +265,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', len(body))
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(body)
 
     def do_GET(self):
         if self.path == '/helios_geometry.json':
-            # Serve helios_geometry.json from root folder
+            # Serve helios_geometry.json from root folder (no-cache: rebuilt by apply-geo)
             try:
                 with open(GEO_JSON, 'rb') as f:
                     body = f.read()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', len(body))
+                self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
                 self.end_headers()
                 self.wfile.write(body)
             except Exception:
@@ -347,7 +350,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         'Bfield': result['detGeo'].get('Bfield', -3.0) if 'detGeo' in result else -3.0,
                     }
                     with open(HELIOS_REACTION_JSON, 'w') as f:
-                        import json as _json; _json.dump(rxData, f, indent=2)
+                        json.dump(rxData, f, indent=2)
                     # Run build_reaction.py
                     r2 = subprocess.run(
                         [sys.executable, BUILD_REACTION_PY, HELIOS_REACTION_JSON],
@@ -369,20 +372,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # Mass lookup from AME2020: /api/mass?AZ=32Si  or  /api/mass?A=32&Z=14
             from urllib.parse import urlparse, parse_qs
             params = parse_qs(urlparse(self.path).query)
-            mass_path = os.path.join(os.path.dirname(DIR), 'mass20.txt')
-            if not os.path.exists(mass_path):
+            masses = _get_masses()
+            if masses is None:
                 self.send_json({'ok': False, 'error': 'mass20.txt not found'}, 404)
             else:
                 try:
                     sys.path.insert(0, os.path.dirname(DIR))
-                    from build_reaction import parse_mass_table, element_symbol
-                    masses = parse_mass_table(mass_path)
+                    from build_reaction import element_symbol
                     A = Z = None
                     if 'AZ' in params:
                         import re
                         az = params['AZ'][0].strip()
                         m = re.match(r'^(\d+)([A-Za-z]+)$', az)
-                        if m: A,Z = int(m.group(1)), next((i for i,s in enumerate(['n','H','He','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn','Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr','Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn']) if s.lower()==m.group(2).lower()), None)
+                        if m: A,Z = int(m.group(1)), next((i for i,s in enumerate(ELEMENT_SYMBOLS) if s.lower()==m.group(2).lower()), None)
                     elif 'A' in params and 'Z' in params:
                         A,Z = int(params['A'][0]), int(params['Z'][0])
                     if A is None or Z is None:
@@ -521,12 +523,26 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 beam_A_val = int(rx.get('beam_A', 1))
                 elab   = float(rx.get('beam_energy_MeVu', 14.0)) * beam_A_val  # total MeV
 
-                # Map A+Z → element symbol
-                ELEM = ['','H','He','Li','Be','B','C','N','O','F','Ne',
-                        'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
-                        'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',
-                        'Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr']
-                def sym(Z): return ELEM[int(Z)] if 0 < int(Z) < len(ELEM) else f'Z{int(Z)}'
+                # A+Z → element symbol from shared module-level ELEMENT_SYMBOLS
+                sym = sym_for_Z
+
+                # Potential reference strings — built once per request, shared across all states
+                _POT_REFS = {
+                    'A':'An and Cai (2006)', 'H':'Han, Shi, Shen (2006)',
+                    'D':'Daehnick (1980) REL', 'C':'Daehnick (1980) NON-REL',
+                    'L':'Lohr and Haeberli (1974)', 'Q':'Perey and Perey (1963)',
+                    'Z':'Zhang, Pang, Lou (2016)',
+                    'K':'Koning and Delaroche (2009)', 'V':'Varner CH89 (1991)',
+                    'M':'Menet (1971)', 'G':'Becchetti and Greenlees (1969)',
+                    'P':'Perey (1963)',
+                    'x':'Xu, Guo, Han, Shen (2011)', 'X':'Xu, Guo, Han, Shen (2011)',
+                    'l':'Liang, Li, Cai (2009)', 'p':'Pang (2009)',
+                    'c':'Li, Liang, Cai (2007)', 't':'Trost (1987)',
+                    'h':'Hyakutake (1980)', 'b':'Becchetti and Greenlees (1971)',
+                    's':'Su and Han (2015)', 'S':'Su and Han (2015)',
+                    'a':'Avrigeanu (2009)', 'f':'Bassani and Picard (1969)',
+                    'n':'zero (neutron)',
+                }
 
                 beam_A  = beam_A_val;  beam_Z  = int(rx.get('beam_Z',  1))
                 tgt_A   = int(rx.get('target_A',2));  tgt_Z   = int(rx.get('target_Z',1))
@@ -594,23 +610,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         if pot_in_key  == 'auto': pot_in_key  = auto_pot(tgt_A, tgt_Z)
                         if pot_out_key == 'auto': pot_out_key = auto_pot(lt_A,  lt_Z)
 
-                        # Potential reference strings
-                        _POT_REFS = {
-                            'A':'An and Cai (2006)', 'H':'Han, Shi, Shen (2006)',
-                            'D':'Daehnick (1980) REL', 'C':'Daehnick (1980) NON-REL',
-                            'L':'Lohr and Haeberli (1974)', 'Q':'Perey and Perey (1963)',
-                            'Z':'Zhang, Pang, Lou (2016)',
-                            'K':'Koning and Delaroche (2009)', 'V':'Varner CH89 (1991)',
-                            'M':'Menet (1971)', 'G':'Becchetti and Greenlees (1969)',
-                            'P':'Perey (1963)',
-                            'x':'Xu, Guo, Han, Shen (2011)', 'X':'Xu, Guo, Han, Shen (2011)',
-                            'l':'Liang, Li, Cai (2009)', 'p':'Pang (2009)',
-                            'c':'Li, Liang, Cai (2007)', 't':'Trost (1987)',
-                            'h':'Hyakutake (1980)', 'b':'Becchetti and Greenlees (1971)',
-                            's':'Su and Han (2015)', 'S':'Su and Han (2015)',
-                            'a':'Avrigeanu (2009)', 'f':'Bassani and Picard (1969)',
-                            'n':'zero (neutron)',
-                        }
                         pot_in_ref  = _POT_REFS.get(pot_in_key,  pot_in_key)
                         pot_out_ref = _POT_REFS.get(pot_out_key, pot_out_key)
 
@@ -643,9 +642,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         import glob
                         for f in glob.glob(fort_pat): os.remove(f)
 
-                        pty_r = subprocess.run(
+                        with open(in_file) as _stdin_fh:
+                          pty_r = subprocess.run(
                             [PTOLEMY],
-                            stdin=open(in_file),
+                            stdin=_stdin_fh,
                             capture_output=True, text=True,
                             timeout=60, cwd=tmpdir
                         )
@@ -759,10 +759,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # suppress access log spam
 
+class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    """Handle each request in a separate thread (prevents DWBA blocking NDS queries)."""
+    allow_reuse_address = True
+    daemon_threads = True
+
 if __name__ == '__main__':
     os.chdir(DIR)
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(('', PORT), Handler) as httpd:
+    _get_masses()  # warm up mass cache at startup
+    with ThreadedTCPServer(('', PORT), Handler) as httpd:
         print(f'HELIOS 3D viewer: http://localhost:{PORT}')
         print(f'From network:     http://192.168.1.101:{PORT}')
         print(f'Config source:    {DIGIOS_WORKING}')

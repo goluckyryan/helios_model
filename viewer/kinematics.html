@@ -106,14 +106,28 @@
     #plot-ez, #plot-rz {
       min-width:300px; min-height:450px; flex:1 1 50%;
     }
-    #plot-dwba, #plot-mc {
+    #plot-dwba {
       min-width:300px; min-height:450px; flex:1 1 50%;
     }
 
     #thetacm-area {
       border-top:1px solid #ddd; padding:6px 8px; background:#fff;
       flex-shrink:0; overflow-x:auto;
+      display:flex; flex-direction:row; gap:18px; align-items:flex-start;
     }
+    #thetacm-main { flex-shrink:0; }
+    .misc-panel {
+      flex-shrink:0; border-left:1px solid #e0e0e0; padding-left:14px;
+    }
+    .misc-panel h3 { font-size:12px; font-weight:bold; color:#444; margin-bottom:5px; }
+    .misc-panel table { border-collapse:collapse; font-size:12px; }
+    .misc-panel td { padding:2px 5px; white-space:nowrap; }
+    .misc-panel input.misc-inp {
+      width:90px; padding:2px 4px; font-size:12px;
+      background:#fff; border:1px solid #ccc; border-radius:3px;
+    }
+    .misc-panel .out-cell { color:#1a4f8a; font-family:monospace; font-size:12px; min-width:90px; }
+    .misc-panel .red-out { color:#c0392b; font-weight:bold; }
     #thetacm-area h3 { font-size:12px; font-weight:bold; color:#444; margin-bottom:5px; }
     #thetacm-inputs { display:flex; align-items:center; gap:12px; margin-bottom:6px; flex-wrap:wrap; }
     #thetacm-inputs label { font-size:12px; color:#555; }
@@ -417,10 +431,10 @@
       <div id="plot-ez"></div>
       <div id="plot-rz"></div>
       <div id="plot-dwba" style="visibility:hidden;"></div>
-      <div id="plot-mc"  style="visibility:hidden;"></div>
     </div>
 
     <div id="thetacm-area">
+    <div id="thetacm-main">
       <h3>&theta;<sub>CM</sub> Calculator</h3>
       <div id="thetacm-inputs">
         <label>E<sub>x</sub> (MeV)
@@ -451,7 +465,98 @@
         </thead>
         <tbody id="thetaCMTable-body"></tbody>
       </table>
+    </div><!-- #thetacm-main -->
+
+    <!-- ── enA / pnA / pps Converter ──────────────────────────────── -->
+    <div class="misc-panel">
+      <h3>enA &nbsp;/&nbsp; pnA &nbsp;/&nbsp; pps &nbsp; Convertor</h3>
+      <table>
+        <tr>
+          <td style="text-align:right">Charge state:</td>
+          <td><input class="misc-inp" id="misc-chargeState" type="number" value="6" min="1" step="1" oninput="miscConvert(1)"></td>
+        </tr>
+        <tr>
+          <td style="text-align:right">Attenuation:</td>
+          <td><input class="misc-inp" id="misc-att" type="text" value="1e4" oninput="miscConvert(1)"></td>
+        </tr>
+        <tr style="text-align:center; font-weight:bold; color:#555; font-size:11px;">
+          <td>enA</td><td>pnA</td><td>pps</td><td>att. pps</td>
+        </tr>
+        <tr>
+          <td><input class="misc-inp" id="misc-enA" type="text" value="6"
+               onkeydown="if(event.key==='Enter')miscConvert(1)" oninput="miscConvert(1)"></td>
+          <td><input class="misc-inp" id="misc-pnA" type="text"
+               onkeydown="if(event.key==='Enter')miscConvert(2)" oninput="miscConvert(2)"></td>
+          <td><input class="misc-inp" id="misc-pps" type="text"
+               onkeydown="if(event.key==='Enter')miscConvert(3)" oninput="miscConvert(3)"></td>
+          <td><span class="out-cell red-out" id="misc-att-out">—</span></td>
+        </tr>
+      </table>
     </div>
+
+    <!-- ── Yield Calculator ──────────────────────────────────────── -->
+    <div class="misc-panel">
+      <h3>Yield Calculator</h3>
+      <table>
+        <tr>
+          <td style="text-align:right">Integrated X-sec</td>
+          <td><input class="misc-inp" id="yld-xsec" type="text" value="4" oninput="yieldCal()"></td>
+          <td>mb</td>
+        </tr>
+        <tr>
+          <td style="text-align:right">Beam intensity</td>
+          <td><input class="misc-inp" id="yld-pps" type="text" value="1e5" oninput="yieldCal()"></td>
+          <td>pps</td>
+        </tr>
+        <tr>
+          <td style="text-align:right">Target thickness</td>
+          <td><input class="misc-inp" id="yld-thick" type="text" value="100" oninput="yieldCal()"></td>
+          <td>&mu;g/cm&sup2;</td>
+        </tr>
+        <tr>
+          <td style="text-align:right">Target molar mass</td>
+          <td><input class="misc-inp" id="yld-molar" type="text" value="2" oninput="yieldCal()"></td>
+          <td>g/mol</td>
+        </tr>
+        <tr>
+          <td style="text-align:right">Nuclei / molecule</td>
+          <td><input class="misc-inp" id="yld-npart" type="text" value="1" oninput="yieldCal()"></td>
+          <td></td>
+        </tr>
+        <tr>
+          <td style="text-align:right">N<sub>target</sub></td>
+          <td><span class="out-cell" id="yld-ntarget">—</span></td>
+          <td>/ cm&sup2;</td>
+        </tr>
+        <tr>
+          <td style="text-align:right">Yield / sec</td>
+          <td><span class="out-cell" id="yld-yield">—</span></td>
+          <td>/ sec</td>
+        </tr>
+        <tr>
+          <td style="text-align:right">Spectroscopic factor</td>
+          <td><input class="misc-inp" id="yld-sf" type="text" value="0.6" oninput="yieldCal()"></td>
+          <td></td>
+        </tr>
+        <tr>
+          <td style="text-align:right">Wanted count</td>
+          <td><input class="misc-inp" id="yld-count" type="text" value="1000" oninput="yieldCal()"></td>
+          <td></td>
+        </tr>
+        <tr>
+          <td style="text-align:right">Stat. uncertainty</td>
+          <td><span class="out-cell" id="yld-error">—</span></td>
+          <td>%</td>
+        </tr>
+        <tr>
+          <td style="text-align:right">Beam time required</td>
+          <td><span class="out-cell red-out" id="yld-days">—</span></td>
+          <td>days</td>
+        </tr>
+      </table>
+    </div>
+
+    </div><!-- #thetacm-area -->
   </div>
 </div>
 
@@ -461,6 +566,10 @@
 // =====================================================================
 // Constants & state (mirrors heliosmatics.js)
 const c = 299.792468; // mm/ns
+
+// Reusable z-array for R-Z traces (avoids 3001 push() calls per fullUpdate)
+const _Z_ARR = new Float64Array(3001);
+(function() { for (let i = 0; i < 3001; i++) _Z_ARR[i] = -2000 + i * 2; })();
 
 const SHORTHAND = HELIOS_SHORTHAND;
 
@@ -646,13 +755,25 @@ function calcRow(Ex, thetaCM_deg) {
   const qb = Math.sqrt(Mb * Mb + k_cm * k_cm);
 
   // Light recoil
+  // SOLARIS-style singularity guard (heliosmatics.js line 367-368):
+  // when sinθ≈0 the helix has zero transverse momentum (on-axis), ρ→0, no orbit.
+  // temp = π·ez_slope·perpDist / (β·k_cm·sinθ) = a/(2ρ); non-finite at sin=0 → skip.
+  const temp = Math.PI * ez_slope / beta / k_cm * perpDist / ss;
+  if (!isFinite(temp)) return null;
+
   const Eb  = gamma_cm * qb - gamma_cm * beta * k_cm * cs - Mb;
   const Zb0 = (gamma_cm * beta * qb - gamma_cm * k_cm * cs) / alpha;
-  if (Math.abs(ss) < 1e-6) return null; // thetaCM=0 or 180: on-axis, no helical orbit
   const rho = k_cm * ss / c / l.Z / Math.abs(BField) * 1000; // mm
 
   let Zb = Zb0;
-  const sinArg = (rho > 0 && isFinite(rho)) ? perpDist / rho / 2 : 2;
+  // EXACT formula from SOLARIS heliosmatics.js line 337 (verified against helix R(z) = 2ρ|sin(πz/Zb0)|):
+  //   z_return = Zb0 * (1 - asin(a/(2ρ)) / π)
+  //
+  // Geometric meaning: RETURN crossing of R=a (z_return = Zb0_full - z_first).
+  // Valid when 2ρ ≥ a (helix can reach detector); at ρ = a/2 the helix grazes R=a tangentially.
+  // Note: Cleopatra Transfer.h uses asin(a/ρ)/(2π) instead — that's a small-angle approximation
+  // that creates a discontinuity at ρ ≈ a (instead of the correct ρ = a/2).
+  const sinArg = perpDist / (2 * rho);   // = a/(2ρ) (SOLARIS exact)
   if (Math.abs(sinArg) <= 1) {
     Zb = Zb0 * (1 - Math.asin(sinArg) / Math.PI);
   }
@@ -671,26 +792,35 @@ function calcRow(Ex, thetaCM_deg) {
 
 // =====================================================================
 // FILL EX TABLE
+// Cached cell refs per row, populated lazily — avoids ~10 getElementById calls per render
+const _EX_CELL_KEYS = ['Eb','Zb0','Zb','2rb','thb','Tb','EB','thB','ZB0h','2rB'];
+function _getRowRefs(tr, rowId) {
+  if (tr._refs && tr._refs.rowId === rowId) return tr._refs;
+  const refs = { rowId,
+    ExEl:    document.getElementById('Ex' + rowId),
+    thetaEl: document.getElementById('theta' + rowId),
+    cells:   {}
+  };
+  _EX_CELL_KEYS.forEach(k => { refs.cells[k] = document.getElementById('c' + rowId + '-' + k); });
+  tr._refs = refs;
+  return refs;
+}
 function fillExTable() {
   const tbody = document.getElementById('ex-tbody');
   const rows = tbody.querySelectorAll('tr');
   rows.forEach((tr, idx) => {
     const rowId = tr.dataset.rowid || (idx + 1);
-    const ExEl    = document.getElementById('Ex' + rowId);
-    const thetaEl = document.getElementById('theta' + rowId);
-    if (!ExEl || !thetaEl) return;
+    const refs  = _getRowRefs(tr, rowId);
+    if (!refs.ExEl || !refs.thetaEl) return;
 
-    const Ex      = parseFloat(ExEl.value) || 0;
-    const thetaCM = parseFloat(thetaEl.value) || 45;
+    const Ex      = parseFloat(refs.ExEl.value) || 0;
+    const thetaCM = parseFloat(refs.thetaEl.value) || 45;
 
     const p = calcRow(Ex, thetaCM);
-    const set = (id, val) => {
-      const el = document.getElementById('c' + rowId + '-' + id);
-      if (el) el.textContent = val;
-    };
+    const set = (id, val) => { const el = refs.cells[id]; if (el) el.textContent = val; };
 
     if (!p || !isFinite(p.Eb) || p.Eb < -1) {
-      ['Eb','Zb0','Zb','2rb','thb','Tb','EB','thB','ZB0h','2rB'].forEach(k => set(k, '—'));
+      _EX_CELL_KEYS.forEach(k => set(k, '—'));
       return;
     }
     set('Eb',   p.Eb.toFixed(3));
@@ -732,7 +862,8 @@ function buildTraces() {
     ExList.push(Ex);
     const col = COLORS[idx % COLORS.length];
 
-    // --- Kinematic line: log-spaced thetaCM (mirrors heliosmatics j=0..99)
+    // --- Kinematic line: log-spaced thetaCM (mirrors SOLARIS heliosmatics.js)
+    // θ_CM=0 singularity is guarded inside calcRow() via SOLARIS-style isFinite(temp) check
     const xArr = [], yArr = [];
     for (let j = 0; j < 100; j++) {
       const thetaCM = Math.PI / Math.log10(100) * Math.log10(100 / (100 - j));
@@ -741,8 +872,8 @@ function buildTraces() {
       if (!pt || !isFinite(pt.Zb) || !isFinite(pt.Eb) || pt.Eb < 0) continue;
       // Skip unphysical points: rho too small (can't reach detector) or infinite (on-axis, ss≈0)
       if (!isFinite(pt.rho) || pt.rho < perpDist / 2) continue;
-      // Skip if Zb is on the wrong side (e.g. upstream array needs z<0)
-      if (pt.Zb > 0 && pt.Zb0 > 0 && pt.Zb0 > 1e4) continue;
+      // Zb naturally has correct sign matching Zb0 (both × same factor close to 1)
+      // The curve sweeps z naturally as thetaCM varies 0→180°; no skip needed
       xArr.push(pt.Zb);
       yArr.push(pt.Eb);
     }
@@ -763,8 +894,7 @@ function buildTraces() {
   });
 
   // R-Z curves
-  const zArr = [];
-  for (let z = -2000; z <= 4000; z += 2) zArr.push(z);
+  const zArr = _Z_ARR; // reuse pre-built array — avoids 3001 push() calls per update
 
   for (let i = 0; i < ExList.length; i++) {
     const col = COLORS[i % COLORS.length];
@@ -960,7 +1090,7 @@ function fullUpdate() {
   const layoutRZ = {
     paper_bgcolor: '#fff', plot_bgcolor: '#f9f9f9',
     font: { color: '#222', family: 'Arial,sans-serif', size: 12 },
-    xaxis: { title: 'Z [mm]', range: xRange, mirror: 'allticks', linewidth: 1,
+    xaxis: { title: 'Z [mm]', range: rzXRange, mirror: 'allticks', linewidth: 1,
              gridcolor: '#ddd', zerolinecolor: '#bbb' },
     yaxis: { title: 'R [mm]', range: [0, rMax_inp], mirror: 'allticks', linewidth: 1,
              gridcolor: '#ddd', zerolinecolor: '#bbb' },
@@ -975,12 +1105,7 @@ function fullUpdate() {
                 modeBarButtonsToRemove: ['lasso2d','select2d'] };
 
   Plotly.react('plot-ez', tracesEZ, layoutEZ, cfg);
-  Plotly.react('plot-rz', tracesRZ, layoutRZ, cfg);
-  // Re-apply manual R-Z z-range (prevent fullUpdate from resetting it)
-  const _rzZmin = parseFloat(document.getElementById('inp-zmin')?.value||-600);
-  const _rzZmax = parseFloat(document.getElementById('inp-zmax')?.value||200);
-  const _rzRmax = parseFloat(document.getElementById('inp-rmax')?.value||50);
-  Plotly.relayout('plot-rz', { 'xaxis.range': [_rzZmin, _rzZmax], 'yaxis.range': [0, _rzRmax] });
+  Plotly.react('plot-rz', tracesRZ, layoutRZ, cfg); // rzXRange already correct — no extra relayout needed
   calThetaCM();
 }
 
@@ -1369,8 +1494,9 @@ function plotPtolemy(results, reactionLabel, ang_min, ang_max) {
   Plotly.react('plot-dwba', traces, layout,
     { responsive: true, displayModeBar: true, displaylogo: false,
       modeBarButtonsToRemove: ['lasso2d','select2d'] });
-  setTimeout(() => { try { Plotly.Plots.resize('plot-dwba'); } catch(e){} }, 100);
+  // responsive:true handles sizing; explicit resize was a double layout pass
 }
+
 
 async function saveConfig() {
   const btn = document.getElementById('save-config-btn');
@@ -1412,32 +1538,41 @@ async function saveConfig() {
 // =====================================================================
 // θCM CALCULATOR  (ported from SOLARIS_Web_Simulation/heliosmatics2.js)
 
-function calZ(theta_deg, k_cm, qb) {
-  // Z position of light recoil after one cyclotron arc, at given θ_CM
-  const cs  = Math.cos(theta_deg * Math.PI / 180);
-  const ss  = Math.sin(theta_deg * Math.PI / 180);
-  const Zb0 = (gamma_cm * beta * qb - gamma_cm * k_cm * cs) / alpha;  // mm
-  const rho = k_cm * ss / c / (1 / (nucCache.light ? nucCache.light.mass / c : 1))
-              / Math.abs(BField) * 1000;  // placeholder — use formula below
-  // rho = p_perp / (q*B)  in mm;  p_perp = k_cm*sin(θ) [MeV/c], q in units of e
-  // Using: rho [mm] = k_cm*ss / (light_charge * |B| * c/1000)
-  //   c = 299.792468 mm/ns, so c/1000 = 0.299792468 mm/ns/MeV * ... 
-  // Exact form from heliosmatics2.js:
-  //   rho = k_cm * ss / c / light[1] / |B| * 1000
-  //   where light[1] = charge of light recoil (Z_b), c in mm/ns
+// Closure builder — hoists per-call constants (alpha, beta, gamma_cm, light Z, BField,
+// perpDist) out of the per-step inner loop. Reduces ~1360 redundant property lookups
+// per calThetaCM() call.
+function _makeCalZ(k_cm, qb) {
   const lightCharge = nucCache.light ? nucCache.light.Z : 1;
-  const rho2 = k_cm * ss / c / lightCharge / Math.abs(BField) * 1000;
-  return Zb0 * (1 - Math.sin(perpDist / 2 / rho2) / Math.PI);
+  const aBF         = Math.abs(BField);
+  const rhoFactor   = k_cm / c / lightCharge / aBF * 1000;   // rho = rhoFactor * sin(θ)
+  const z0Factor1   = gamma_cm * beta * qb / alpha;          // constant term of Zb0
+  const z0Factor2   = gamma_cm * k_cm / alpha;               // coefficient of cos(θ)
+  const halfPd      = perpDist / 2;
+  return function(theta_deg) {
+    const rad = theta_deg * Math.PI / 180;
+    const cs  = Math.cos(rad), ss = Math.sin(rad);
+    const Zb0 = z0Factor1 - z0Factor2 * cs;
+    const rho = rhoFactor * ss;
+    // SOLARIS exact: z_return = Zb0 * (1 - asin(a/(2ρ))/π)
+    const sinArg = Math.min(1, halfPd / rho);
+    return Zb0 * (1 - Math.asin(sinArg) / Math.PI);
+  };
+}
+
+// Standalone calZ — kept for any other callers (currently none, but cheap to keep)
+function calZ(theta_deg, k_cm, qb) {
+  return _makeCalZ(k_cm, qb)(theta_deg);
 }
 
 function searchThetaCM(Z_pos, thetaMin, k_cm, qb) {
+  const calZf = _makeCalZ(k_cm, qb);   // build closure once per search
   let step = 0.01;
   for (let yy = thetaMin; yy < 180; yy += step) {
     if (yy > 12) step = 0.1;
     if (yy > 20) step = 0.5;
     if (yy > 40) step = 1.0;
-    const z1 = calZ(yy,        k_cm, qb);
-    const z2 = calZ(yy + step, k_cm, qb);
+    const z1 = calZf(yy);
+    const z2 = calZf(yy + step);
     if (z1 > z2) continue;  // still in bending range
     if (Z_pos < z1) break;
     if (z1 <= Z_pos && Z_pos <= z2) {
@@ -1869,12 +2004,17 @@ function plotNdsLevels(levels, nuclideName, sepEnergies) {
   // Serialise to JSON for the popup
   const payload = JSON.stringify({ data, layout });
 
-  // Open browser popup centered on parent window
+  // Reuse a single named popup window — avoids accumulating orphaned windows
   const popW = plotWidth + 40, popH = plotHeight + 40;
   const left = Math.round(window.screenX - popW);
   const top  = Math.round(window.screenY);
-  const popup = window.open('', `nds_levels_plot_${Date.now()}`,
-    `width=${popW},height=${popH},left=${left},top=${top},resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no`);
+  // Try to reuse existing popup; open new one only if closed or blocked
+  let popup = _ndsLevelPopup;
+  if (!popup || popup.closed) {
+    popup = window.open('', 'nds_levels_plot',
+      `width=${popW},height=${popH},left=${left},top=${top},resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no`);
+    _ndsLevelPopup = popup;
+  }
   if (!popup) {
     alert('Popup blocked! Please allow popups for this page.');
     return;
@@ -1923,7 +2063,74 @@ window.addEventListener('load', () => {
   loadFromServerFull();
   ndsInit();
 
+  // Init misc calculators
+  miscConvert(1);
+  yieldCal();
+
 });
+
+// =====================================================================
+// enA / pnA / pps Converter
+// =====================================================================
+function miscConvert(type) {
+  const eee = 6241510000; // electrons per nA (1 nA / e)
+  const chargeState = parseFloat(document.getElementById('misc-chargeState').value) || 1;
+  const attenuation = parseFloat(document.getElementById('misc-att').value) || 1;
+
+  let enA, pnA, pps;
+  if (type === 1) {
+    enA = parseFloat(document.getElementById('misc-enA').value);
+    if (isNaN(enA)) return;
+    pnA = enA / chargeState;
+    pps = pnA * eee;
+  } else if (type === 2) {
+    pnA = parseFloat(document.getElementById('misc-pnA').value);
+    if (isNaN(pnA)) return;
+    enA = pnA * chargeState;
+    pps = pnA * eee;
+  } else {
+    pps = parseFloat(document.getElementById('misc-pps').value);
+    if (isNaN(pps)) return;
+    pnA = pps / eee;
+    enA = pnA * chargeState;
+  }
+
+  const att = pps / attenuation;
+  if (type !== 1) document.getElementById('misc-enA').value = enA.toPrecision(4);
+  if (type !== 2) document.getElementById('misc-pnA').value = pnA.toPrecision(4);
+  if (type !== 3) document.getElementById('misc-pps').value = pps.toExponential(3);
+  document.getElementById('misc-att-out').textContent = att.toExponential(3);
+}
+
+// =====================================================================
+// Yield Calculator
+// =====================================================================
+function yieldCal() {
+  const NA    = 6.0221409e23;
+  const mb2cm = 1e-27;  // 1 mb = 1e-27 cm^2
+
+  const xsec   = parseFloat(document.getElementById('yld-xsec').value);
+  const pps    = parseFloat(document.getElementById('yld-pps').value);
+  const thick  = parseFloat(document.getElementById('yld-thick').value); // ug/cm2
+  const molar  = parseFloat(document.getElementById('yld-molar').value);
+  const npart  = parseFloat(document.getElementById('yld-npart').value) || 1;
+  const sf     = parseFloat(document.getElementById('yld-sf').value)    || 1;
+  const wanted = parseFloat(document.getElementById('yld-count').value) || 1000;
+
+  if ([xsec,pps,thick,molar,npart].some(isNaN)) return;
+
+  const nTarget = thick * NA * npart / molar / 1e6;  // thick in ug/cm2 → g/cm2 = /1e6
+  const yieldPS = xsec * pps * nTarget * mb2cm;
+
+  document.getElementById('yld-ntarget').textContent = nTarget.toExponential(3);
+  document.getElementById('yld-yield').textContent   = yieldPS.toPrecision(4);
+
+  const error = (Math.sqrt(wanted) / wanted * 100);
+  document.getElementById('yld-error').textContent = error.toPrecision(3);
+
+  const days = wanted / sf / yieldPS / 86400;
+  document.getElementById('yld-days').textContent = isFinite(days) ? days.toPrecision(4) : '—';
+}
 </script>
 </body>
 </html>

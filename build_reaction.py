@@ -186,6 +186,7 @@ def write_reaction_dat(result, path):
         f.write(f"{result['betaCM']:.8f}       //betaCM\n")
         f.write(f"{result['Ecm']:.4f}       //Ecm\n")
         f.write(f"{result['mass_B']:.4f}       //mass_B\n")
+        f.write(f"{int(result['charge_B'])}                //charge_B\n")
         f.write(f"{result['alpha']:.4f}       //alpha=slope/betaRect\n")
     print(f"  Written: {path}")
 
