@@ -25,6 +25,13 @@ detPos calculation (mirrors AnalysisLibrary.h LoadDetectorGeo):
 import json, math, sys, os
 
 def parse_detgeo(path):
+    """Parse detectorGeo.txt into a named dict (single source of truth)."""
+    keys = [
+        'Bfield', 'Bfield_theta', 'bore', 'perpDist', 'width', 'length',
+        'recoilPos', 'recoilInner', 'recoilOuter', 'isCoincident',
+        'recoilPos1', 'recoilPos2', 'elumPos1', 'elumPos2', 'blocker',
+        'firstPos', 'eSigma', 'zSigma', 'facing', 'mDet',
+    ]
     values = []
     with open(path) as f:
         for line in f:
@@ -32,46 +39,91 @@ def parse_detgeo(path):
             if not line or line.startswith('#'):
                 continue
             tok = line.split()[0]
+            values.append(tok)
+    result = {}
+    for i, k in enumerate(keys):
+        if i < len(values):
             try:
-                values.append(float(tok))
+                result[k] = float(values[i])
             except ValueError:
-                values.append(tok)
-    return values
+                result[k] = values[i]
+    det_pos = []
+    for v in values[len(keys):]:
+        try:
+            det_pos.append(float(v))
+        except ValueError:
+            pass
+    result['detPos'] = det_pos
+    result['nDet'] = len(det_pos)
+    first = result.get('firstPos', 0)
+    length = result.get('length', 0)
+    if det_pos:
+        if first < 0:
+            result['zMin'] = first - det_pos[-1] - length
+            result['zMax'] = first - det_pos[0]
+        else:
+            result['zMin'] = first + det_pos[0]
+            result['zMax'] = first + det_pos[-1] + length
+    return result
+
+
+def parse_reaction_config(path):
+    """Parse reactionConfig.txt into a named dict (single source of truth)."""
+    from build_reaction import element_symbol
+    keys = [
+        'beam_A', 'beam_Z', 'target_A', 'target_Z',
+        'recoil_light_A', 'recoil_light_Z', 'beam_energy_MeVu',
+        'beam_energy_sigma', 'beam_angle', 'beam_emittance',
+        'x_offset', 'y_offset', 'n_events', 'isTargetScattering',
+        'target_density', 'target_thickness',
+    ]
+    values = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            tok = line.split()[0]
+            values.append(tok)
+    result = {}
+    for i, k in enumerate(keys):
+        if i < len(values):
+            try:
+                result[k] = float(values[i])
+            except ValueError:
+                result[k] = values[i]
+    if 'beam_A' in result and 'beam_Z' in result:
+        result['beam_label']         = f"{int(result['beam_A'])}{element_symbol(int(result['beam_Z']))}"
+        result['target_label']       = f"{int(result.get('target_A',2))}{element_symbol(int(result.get('target_Z',1)))}"
+        result['recoil_light_label'] = f"{int(result.get('recoil_light_A',1))}{element_symbol(int(result.get('recoil_light_Z',1)))}"
+    return result
 
 def load_geometry(geo_file="detectorGeo.txt"):
-    v = parse_detgeo(geo_file)
-    idx = 0
-    def nxt(): nonlocal idx; val = v[idx]; idx += 1; return val
+    v = parse_detgeo(geo_file)  # now returns a named dict
 
-    Bfield       = float(nxt())
-    Bfield_theta = float(nxt())
-    bore         = float(nxt())
-    perpDist     = float(nxt())
-    width        = float(nxt())
-    length       = float(nxt())
-    recoilPos    = float(nxt())
-    recoilInner  = float(nxt())
-    recoilOuter  = float(nxt())
-    isCoincident = nxt()
-    recoilPos1   = float(nxt())
-    recoilPos2   = float(nxt())
-    elumPos1     = float(nxt())
-    elumPos2     = float(nxt())
-    blocker      = float(nxt())
-    firstPos     = float(nxt())
-    eSigma       = float(nxt())
-    zSigma       = float(nxt())
-    facing       = str(nxt())
-    mDet         = int(float(nxt()))
+    Bfield       = float(v['Bfield'])
+    Bfield_theta = float(v.get('Bfield_theta', 0))
+    bore         = float(v['bore'])
+    perpDist     = float(v['perpDist'])
+    width        = float(v['width'])
+    length       = float(v['length'])
+    recoilPos    = float(v['recoilPos'])
+    recoilInner  = float(v.get('recoilInner', 10.0))
+    recoilOuter  = float(v.get('recoilOuter', 40.2))
+    isCoincident = v.get('isCoincident', False)
+    recoilPos1   = float(v.get('recoilPos1', 0))
+    recoilPos2   = float(v.get('recoilPos2', 0))
+    elumPos1     = float(v.get('elumPos1', 0))
+    elumPos2     = float(v.get('elumPos2', 0))
+    blocker      = float(v.get('blocker', 0))
+    firstPos     = float(v['firstPos'])
+    eSigma       = float(v.get('eSigma', 0))
+    zSigma       = float(v.get('zSigma', 0))
+    facing       = str(v.get('facing', 'Out'))
+    mDet         = int(float(v.get('mDet', 4)))
 
-    # Remaining: pos[] offsets from firstPos (mm), nDet values
-    pos = []
-    while idx < len(v):
-        try:
-            pos.append(float(v[idx])); idx += 1
-        except (ValueError, TypeError):
-            idx += 1
-    nDet = len(pos)
+    pos  = v['detPos']
+    nDet = v['nDet']
 
     # Compute absolute detector positions (near edge) — mirrors AnalysisLibrary.h
     detPos = []
@@ -184,14 +236,42 @@ if __name__ == "__main__":
     geo = load_geometry(args.geo_path)
     # Apply overrides
     if args.firstPos is not None:
-        delta = args.firstPos - geo['firstPos']
-        geo['firstPos'] = args.firstPos
-        geo['zMin'] += delta
-        geo['zMax'] += delta
-        for d in geo['detectors']:
-            d['z_near']   += delta
-            d['z_center'] += delta
-            d['z']        += delta
+        old_fp  = geo['firstPos']
+        new_fp  = args.firstPos
+        length  = geo['length']
+        same_side = (old_fp < 0) == (new_fp < 0)
+        if same_side:
+            # Simple shift — sign didn't change, near/center relationship unchanged
+            delta = new_fp - old_fp
+            geo['firstPos'] = new_fp
+            geo['zMin'] += delta
+            geo['zMax'] += delta
+            for d in geo['detectors']:
+                d['z_near']   += delta
+                d['z_center'] += delta
+                d['z']        += delta
+        else:
+            # Sign crossed zero: downstream↔upstream flip.
+            # Reconstruct z_near from each detector's offset from old firstPos,
+            # then recompute z_near and z_center under new sign convention.
+            geo['firstPos'] = new_fp
+            for d in geo['detectors']:
+                # Recover the original offset magnitude
+                offset = abs(d['z_near'] - old_fp)
+                if new_fp < 0:
+                    # Now upstream: z_near = firstPos - offset (downstream edge)
+                    # z_center = z_near - length/2
+                    d['z_near']   = round(new_fp - offset, 4)
+                    d['z_center'] = round(d['z_near'] - length / 2, 4)
+                else:
+                    # Now downstream: z_near = firstPos + offset (upstream edge)
+                    # z_center = z_near + length/2
+                    d['z_near']   = round(new_fp + offset, 4)
+                    d['z_center'] = round(d['z_near'] + length / 2, 4)
+                d['z'] = d['z_center']
+            znears = [d['z_near'] for d in geo['detectors']]
+            geo['zMin'] = min(znears) - (length if new_fp < 0 else 0)
+            geo['zMax'] = max(znears) + (length if new_fp > 0 else 0)
         print(f"  Overriding firstPos to {args.firstPos} mm")
     if args.recoilPos is not None:
         geo['recoilPos'] = args.recoilPos

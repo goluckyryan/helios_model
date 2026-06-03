@@ -1166,6 +1166,79 @@ function deleteRow() {
 // LOAD CONFIG FROM SERVER
 // Sources: detectorGeo.txt (geometry) + reactionConfig.txt (nuclides)
 // Then auto-run build_reaction.py to recompute helios_reaction.json
+
+// ── Load from saved helios_reaction.json only (manual config_source) ──────
+// Restores panel + nucCache from the saved JSON without hitting digios files.
+async function loadFromSavedJson() {
+  try {
+    const rc = await fetch('/api/reaction_config');
+    const rd = await rc.json();
+    if (!rd.ok || !rd.reaction) return;
+    const rx = rd.reaction;
+
+    // Restore geometry sliders from helios_geometry.json
+    try {
+      const rg = await fetch('/helios_geometry.json');
+      const gd = await rg.json();
+      if (gd.Bfield !== undefined) {
+        document.getElementById('sl-bfield').value = gd.Bfield;
+        document.getElementById('sp-bfield').value = parseFloat(gd.Bfield).toFixed(2);
+      }
+      if (gd.firstPos !== undefined) {
+        document.getElementById('sl-array').value = gd.firstPos;
+        document.getElementById('sp-array').value = gd.firstPos;
+      }
+      if (gd.recoilPos !== undefined) {
+        document.getElementById('sl-rdt').value = gd.recoilPos;
+        document.getElementById('sp-rdt').value = gd.recoilPos;
+      }
+    } catch(e) {}
+
+    // Restore reaction fields
+    if (rx.beam_label)         document.getElementById('inp-beam').value   = rx.beam_label;
+    if (rx.target_label)       document.getElementById('inp-target').value = rx.target_label;
+    if (rx.recoil_light_label) document.getElementById('inp-light').value  = rx.recoil_light_label;
+    if (rx.beam_energy_MeVu) {
+      document.getElementById('inp-energy').value = rx.beam_energy_MeVu;
+      document.getElementById('sl-energy').value  = Math.min(30, rx.beam_energy_MeVu);
+    }
+
+    // Restore nucCache + kinematics from saved computed fields
+    _currentReaction = rx;
+    refreshPotSelects();
+    const azLabel = heliosNuclideName;
+    if (rx.beam_A != null && rx.beam_Z != null)
+      nucCache.beam   = { A: rx.beam_A,         Z: rx.beam_Z,         mass: rx.Ma,     name: rx.beam_label   || azLabel(rx.beam_A,rx.beam_Z) };
+    if (rx.target_A != null && rx.target_Z != null)
+      nucCache.target = { A: rx.target_A,       Z: rx.target_Z,       mass: rx.Mt,     name: rx.target_label || azLabel(rx.target_A,rx.target_Z) };
+    if (rx.recoil_light_A != null && rx.recoil_light_Z != null)
+      nucCache.light  = { A: rx.recoil_light_A, Z: rx.recoil_light_Z, mass: rx.mass_b, name: rx.recoil_light_label || azLabel(rx.recoil_light_A,rx.recoil_light_Z) };
+
+    const hA = (rx.beam_A||0)+(rx.target_A||0)-(rx.recoil_light_A||0);
+    const hZ = (rx.beam_Z||0)+(rx.target_Z||0)-(rx.recoil_light_Z||0);
+    nucCache.heavy = { A: hA, Z: hZ, mass: rx.mass_B, name: rx.recoil_heavy_label || azLabel(hA,hZ) };
+    fetch('/api/mass?A=' + hA + '&Z=' + hZ).then(r=>r.json()).then(md=>{
+      if (md.ok) { nucCache.heavy.Sn=md.Sn; nucCache.heavy.Sp=md.Sp; nucCache.heavy.Sa=md.Sa; }
+    }).catch(()=>{});
+
+    document.getElementById('info-beam').textContent   = rx.Ma    ? rx.Ma.toFixed(3)+' MeV/c²'    : '?';
+    document.getElementById('info-target').textContent = rx.Mt    ? rx.Mt.toFixed(3)+' MeV/c²'    : '?';
+    document.getElementById('info-light').textContent  = rx.mass_b ? rx.mass_b.toFixed(3)+' MeV/c²' : '?';
+    ['info-beam','info-target','info-light'].forEach(id =>
+      document.getElementById(id).style.color = '#1a8a3a');
+    document.getElementById('reaction-title').textContent = rx.reaction_str || '';
+    scheduleUpdate();
+  } catch(e) {
+    console.warn('loadFromSavedJson error:', e);
+    // Fallback: try individual lookups
+    if (!nucCache.beam)   await lookupNuc('beam');
+    if (!nucCache.target) await lookupNuc('target');
+    if (!nucCache.light)  await lookupNuc('light');
+    if (!nucCache.heavy && nucCache.beam && nucCache.target && nucCache.light) computeHeavy();
+    scheduleUpdate();
+  }
+}
+
 async function loadFromServerFull() {
   const statusEl = document.querySelector('#rx-status') || document.querySelector('#info-beam');
   try {
@@ -1209,7 +1282,7 @@ async function loadFromServerFull() {
         target_A: rc.target_A, target_Z: rc.target_Z,
         recoil_light_A: rc.recoil_light_A, recoil_light_Z: rc.recoil_light_Z,
         beam_energy_MeVu: rc.beam_energy_MeVu,
-        Bfield: d2.detGeo ? d2.detGeo.Bfield : -3.0,
+        config_source: 'digios',
       };
       const rb = await fetch('/api/build_reaction', {
         method: 'POST', headers: {'Content-Type':'application/json'},
@@ -1506,7 +1579,8 @@ async function saveConfig() {
     const fp  = parseFloat(document.getElementById('sl-array').value);
     const rp  = parseFloat(document.getElementById('sl-rdt').value);
     // 1. Save helios_geometry.json
-    const r1 = await fetch('/api/rebuild_geo?firstPos=' + fp + '&recoilPos=' + rp);
+    const bf = parseFloat(document.getElementById('sl-bfield').value);
+    const r1 = await fetch('/api/rebuild_geo?firstPos=' + fp + '&recoilPos=' + rp + '&Bfield=' + bf + '&config_source=manual');
     const d1 = await r1.json();
     if (!d1.ok) throw new Error('Geometry: ' + d1.error);
     // 2. Save helios_reaction.json via POST /api/build_reaction
@@ -1516,7 +1590,7 @@ async function saveConfig() {
         target_A: nucCache.target.A, target_Z: nucCache.target.Z,
         recoil_light_A: nucCache.light.A, recoil_light_Z: nucCache.light.Z,
         beam_energy_MeVu: parseFloat(document.getElementById('inp-energy').value),
-        Bfield: parseFloat(document.getElementById('sl-bfield').value),
+        config_source: 'manual',
       };
       const r2 = await fetch('/api/build_reaction', {
         method: 'POST', headers: {'Content-Type':'application/json'},
@@ -1667,6 +1741,8 @@ function calThetaCM() {
 // =====================================================================
 // NUCLEAR DATA SERVER (NDS)
 
+let _ndsLevelPopup = null;  // reusable popup window for ENSDF level plots
+
 const NDS_SHORTHAND = {
   'n':'1n','p':'1H','d':'2H','D':'2H','t':'3H','T':'3H',
   'h':'3He','H':'3He','a':'4He','A':'4He','alpha':'4He',
@@ -1679,7 +1755,10 @@ function ndsResolveIso(raw) {
   if (!m) return null;
   const A = parseInt(m[1]);
   const sym = m[2];
-  const Z = ELEMENT_SYMBOLS.findIndex(el => el.toLowerCase() === sym.toLowerCase());
+  // Case-sensitive lookup: canonicalize sym to Title-case (e.g. 'n'→'n', 'N'→'N', 'he'→'He')
+  // Index 0 is 'n' (neutron); index 7 is 'N' (nitrogen) — must NOT conflate them.
+  const symCanon = sym.length === 1 ? sym : sym[0].toUpperCase() + sym.slice(1).toLowerCase();
+  const Z = ELEMENT_SYMBOLS.findIndex(el => el === symCanon);
   if (Z < 0) return null;
   return { A, Z, name: A + ELEMENT_SYMBOLS[Z] };
 }
@@ -1891,7 +1970,7 @@ async function ndsRetrieve() {
         levelsDiv.style.display = 'block';
         levelsDiv.innerHTML = tbl;
         // Open level plot popup
-        plotNdsLevels(levels, iso.name, { Sn, Sp, Sa });
+        plotNdsLevels(levels, iso.name, { Sn, Sp, Sa }, exMaxMeV);
       }
     }
 
@@ -1903,17 +1982,24 @@ async function ndsRetrieve() {
   }
 }
 
-function plotNdsLevels(levels, nuclideName, sepEnergies) {
+function plotNdsLevels(levels, nuclideName, sepEnergies, exMaxMeV=null) {
   const { Sn=null, Sp=null, Sa=null } = sepEnergies || {};
-  // Build energy + jpi arrays from ENSDF levels
-  const energy = levels.map(l => Number(l.energy_keV) / 1000);  // MeV
-  const jpi    = levels.map(l => l.spin_parity || '');
+  // Build energy + jpi arrays from ENSDF levels — filter above Ex max
+  const exCeil = (exMaxMeV !== null && isFinite(exMaxMeV)) ? exMaxMeV : Infinity;
+  const allEnergy = levels.map(l => { const v = parseFloat(l.energy_keV); return isFinite(v) ? v / 1000 : 0; });
+  const allJpi    = levels.map(l => l.spin_parity || '');
+  // Drop levels above the ceiling (NaN-safe)
+  const energy = [], jpi = [];
+  for (let i = 0; i < allEnergy.length; i++) {
+    if (isFinite(allEnergy[i]) && allEnergy[i] <= exCeil) { energy.push(allEnergy[i]); jpi.push(allJpi[i]); }
+  }
 
   const plotWidth  = 320;
   const plotHeight = 580;
   const yMin   = -0.5;
-  const maxEx  = Math.max(...energy);
-  const yMax   = maxEx + 1.5;
+  const maxEx  = energy.length ? Math.max(...energy) : 0;
+  // yMax respects the Ex ceiling: don't show sep lines or space above the cut
+  const yMax   = Math.min(maxEx + 1.5, exCeil + 0.5);
   const yRange = yMax - yMin;
   const fontSize    = 13;
   const fontSizeMeV = fontSize / plotHeight * yRange;  // label height in MeV units
@@ -1968,7 +2054,7 @@ function plotNdsLevels(levels, nuclideName, sepEnergies) {
     { val: Sa, color: '#e91e8c', label: 'Sα' },
   ];
   for (const { val, color, label } of sepLines) {
-    if (val === null || val < yMin || val > yMax) continue;
+    if (val === null || val < yMin || val > yMax || val > exCeil) continue;
     data.push({ x: [-0.1, 1.0], y: [val, val],
       mode: 'lines', line: { color, width: 1.5 },
       showlegend: false });
@@ -2060,7 +2146,24 @@ window.addEventListener('load', () => {
     if (!tr.dataset.rowid) tr.dataset.rowid = i + 1;
   });
   refreshPotSelects();
-  loadFromServerFull();
+  // Check config_source in helios_reaction.json:
+  // 'digios' → load fresh from digios files; 'manual' → load saved JSON only (no digios)
+  (async () => {
+    let source = 'digios'; // default: load from digios if no JSON exists yet
+    try {
+      const rc = await fetch('/api/reaction_config');
+      const rd = await rc.json();
+      if (rd.ok && rd.reaction && rd.reaction.config_source) {
+        source = rd.reaction.config_source;
+      }
+    } catch(e) {}
+    if (source === 'digios') {
+      await loadFromServerFull();
+    } else {
+      // Manual save: restore from saved helios_reaction.json only, skip digios
+      await loadFromSavedJson();
+    }
+  })();
   ndsInit();
 
   // Init misc calculators

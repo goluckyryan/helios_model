@@ -36,7 +36,10 @@ function heliosParseNuclide(raw) {
   if (!m) return null;
   const A = parseInt(m[1]);
   const sym = m[2];
-  const Z = ELEMENT_SYMBOLS.findIndex(s => s.toLowerCase() === sym.toLowerCase());
+  // Case-sensitive lookup: canonicalize to Title-case (e.g. "n"->"n", "N"->"N", "he"->"He")
+  // ELEMENT_SYMBOLS[0]="n" (neutron), ELEMENT_SYMBOLS[7]="N" (nitrogen) -- must not conflate them.
+  const symCanon = sym.length === 1 ? sym : sym[0].toUpperCase() + sym.slice(1).toLowerCase();
+  const Z = ELEMENT_SYMBOLS.findIndex(s => s === symCanon);
   if (Z < 0) return null;
   return { A, Z, sym: ELEMENT_SYMBOLS[Z], name: A + ELEMENT_SYMBOLS[Z], resolved };
 }

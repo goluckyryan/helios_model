@@ -75,8 +75,8 @@
   <div id="ui">
     <h3>☀ HELIOS</h3>
     <div class="control"><label>Bore opacity</label><input type="range" id="bore-opacity" min="0" max="40" value="20" style="width:136px;"></div>
-    <div class="control"><label>Rotate speed</label><input type="range" id="rotate-speed" min="-100" max="100" value="0" style="width:136px;"></div>
-    <div class="control"><label>B-field (T)</label><input type="range" id="bfield" min="-5" max="5" value="-3" step="0.1" style="width:60px;"><input type="number" id="bfield-val" min="-5" max="5" step="0.1" value="-3" style="width:68px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:2px 4px;font-family:monospace;"></div>
+    <div class="control"><label>Rotate speed</label><input type="range" id="rotate-speed" min="-10" max="10" value="0" style="width:136px;"></div>
+    <div class="control"><label>B-field (T)</label><input type="range" id="bfield" min="-5" max="5" value="-3" step="0.1" style="width:60px;"><input type="number" id="bfield-val" min="-5" max="5" step="0.01" value="-3" style="width:68px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:2px 4px;font-family:monospace;"></div>
     <div class="control"><label>Color mode</label>
       <select id="color-mode">
         <option value="row">By Row (side)</option>
@@ -112,7 +112,7 @@
 </div>
 
   <div style="background:rgba(13,17,23,0.88);border:1px solid #30363d;border-radius:8px;padding:12px 16px;font-size:12px;">
-  <div style="display:flex;gap:20px;align-items:flex-start;">
+  <div style="display:flex;gap:12px;align-items:flex-start;">
 
     <!-- Kinematics column (first) -->
     <div id="event-panel" style="min-width:160px;">
@@ -121,7 +121,7 @@
       <div class="control"><label>φ_CM (deg)</label><input type="number" id="phi-cm" value="30" min="0" max="360" step="1"></div>
       <div class="control"><label>Ex (MeV)</label><input type="number" id="ex-mev" value="0" min="0" max="10" step="0.1"></div>
       <div class="control"><label>Anim speed</label><input type="range" id="anim-speed" min="1" max="10" value="1"></div>
-      <div class="control" style="display:flex;align-items:center;gap:4px;"><label>Random θ,φ</label><input type="checkbox" id="random-angles" checked style="margin-left:4px;"><span style="color:#8b949e;font-size:10px;margin-left:6px;">max</span><input type="number" id="max-theta" value="60" min="1" max="180" step="1" style="width:44px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:1px 3px;font-size:11px;"><span style="color:#8b949e;font-size:10px;">°</span></div>
+      <div class="control" style="display:flex;align-items:center;gap:4px;"><label>Random θ,φ</label><input type="checkbox" id="random-angles" checked style="margin-left:4px;"><span style="color:#8b949e;font-size:10px;margin-left:6px;">min</span><input type="number" id="min-theta" value="10" min="0" max="179" step="1" style="width:40px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:1px 3px;font-size:11px;"><span style="color:#8b949e;font-size:10px;">°&nbsp;max</span><input type="number" id="max-theta" value="60" min="1" max="180" step="1" style="width:40px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:1px 3px;font-size:11px;"><span style="color:#8b949e;font-size:10px;">°</span></div>
       <div class="control"><label>Stop on support</label><input type="checkbox" id="stop-on-support" checked style="margin-left:8px;"></div>
       <div class="control"><label>Rate /sec</label><input type="range" id="gen-rate" min="1" max="10" value="3" step="1"><span id="gen-rate-val" style="color:#ffa657;">3/s</span></div>
       <div class="control"><label>Keep N</label><input type="range" id="keep-n" min="1" max="20" value="5" step="1"><span id="keep-n-val" style="color:#ffa657;">5</span></div>
@@ -131,12 +131,14 @@
     </div>
 
     <!-- Geometry column (second) -->
-    <div style="min-width:140px;">
+    <div style="width:150px;flex-shrink:0;">
       <div style="color:#ffa657;font-weight:bold;margin-bottom:8px;font-size:13px;">⚙ Geometry</div>
-      <div class="control"><label>Array pos (mm) </label><input type="number" id="array-pos" value="-121" min="-600" max="600" step="1" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
-      <div class="control"><label>RDT pos (mm) </label><input type="number" id="rdt-pos" value="1000" min="100" max="3000" step="10" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
+      <div class="control"><label>Array (mm)</label><input type="number" id="array-pos" value="-121" min="-600" max="600" step="1" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
+      <div class="control"><label>RDT (mm)</label><input type="number" id="rdt-pos" value="1000" min="100" max="3000" step="10" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:2px 4px;"></div>
       <button id="load-config-btn" style="width:100%;margin-top:6px;padding:4px;background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">↓ Load digios</button>
       <button id="apply-geo-btn" style="width:100%;margin-top:4px;padding:4px;background:#21262d;border:1px solid #3fb950;color:#3fb950;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">▶ Reposition</button>
+      <button id="record-btn" onclick="toggleRecording()" style="width:100%;margin-top:4px;padding:4px;background:#21262d;border:1px solid #f85149;color:#f85149;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;">⏺ Record MPEG</button>
+      <div id="record-status" style="font-size:10px;color:#484f58;margin-top:3px;text-align:center;"></div>
     </div>
 
     <!-- Reaction column -->
@@ -953,7 +955,9 @@ function generateEvent(autoMode = false) {
   // Both manual and auto accumulate up to keepN tracks; Clear button resets
 
   const useRandom = document.getElementById('random-angles').checked;
-  const thetaCM = useRandom ? (Math.random() * (parseFloat(document.getElementById('max-theta')?.value||60))) + 1 : parseFloat(document.getElementById('theta-cm').value);
+  const minTh = parseFloat(document.getElementById('min-theta')?.value||1);
+  const maxTh = parseFloat(document.getElementById('max-theta')?.value||60);
+  const thetaCM = useRandom ? minTh + Math.random() * (maxTh - minTh) : parseFloat(document.getElementById('theta-cm').value);
   const phiCM   = useRandom ? Math.random() * 360     : parseFloat(document.getElementById('phi-cm').value);
   const Ex      = useRandom ? Math.random() * 5 : parseFloat(document.getElementById('ex-mev').value);
 
@@ -988,7 +992,7 @@ function generateEvent(autoMode = false) {
   let thetaCM_used = thetaCM, phiCM_used = phiCM;
   let attempts = 0;
   while (attempts < 50) {
-    thetaCM_used = useRandom ? (Math.random()*(parseFloat(document.getElementById('max-theta')?.value||60))+1) : thetaCM;
+    thetaCM_used = useRandom ? minTh + Math.random() * (maxTh - minTh) : thetaCM;
     phiCM_used   = useRandom ? Math.random()*360   : phiCM;
     const t = computeTrack(REACTION.mass_b, REACTION.charge_b, thetaCM_used, phiCM_used, Ex, Bfield, true);
     if (!t) { attempts++; continue; }
@@ -1411,7 +1415,7 @@ document.getElementById('rx-build-btn').addEventListener('click', async () => {
     recoil_light_A:   parseInt(document.getElementById('rx-rec-A').value),
     recoil_light_Z:   parseInt(document.getElementById('rx-rec-Z').value),
     beam_energy_MeVu: parseFloat(document.getElementById('rx-energy').value),
-    Bfield:           GEO ? GEO.Bfield : -3.0,
+    config_source:    'manual',
   };
   try {
     // POST rxData directly to /api/build_reaction — saves + builds in one step
@@ -1437,7 +1441,7 @@ document.getElementById('rx-build-btn').addEventListener('click', async () => {
 
 document.getElementById('bfield').addEventListener('input', function() {
   const v = parseFloat(this.value);
-  document.getElementById('bfield-val').value = v.toFixed(1);
+  document.getElementById('bfield-val').value = v.toFixed(2);
   if (GEO) GEO.Bfield = v;
   clearTracks();
 });
@@ -1453,7 +1457,7 @@ document.getElementById('load-config-btn').addEventListener('click', async () =>
   const status = document.getElementById('config-status');
   btn.disabled = true; btn.textContent = '⟳ Loading...';
   try {
-    // 1) Fetch config from digios
+    // 1) Fetch config from digios — marks both JSONs as source=digios
     const resp = await fetch('/api/config');
     const d = await resp.json();
 
@@ -1462,7 +1466,7 @@ document.getElementById('load-config-btn').addEventListener('click', async () =>
       document.getElementById('array-pos').value  = d.detGeo.firstPos;
       document.getElementById('rdt-pos').value    = d.detGeo.recoilPos;
       document.getElementById('bfield').value     = d.detGeo.Bfield;
-      document.getElementById('bfield-val').value = parseFloat(d.detGeo.Bfield).toFixed(1);
+      document.getElementById('bfield-val').value = parseFloat(d.detGeo.Bfield).toFixed(2);
       if (GEO) GEO.Bfield = d.detGeo.Bfield;
     }
 
@@ -1539,7 +1543,7 @@ async function _doApplyGeometry(newFirstPos, newRDTPos, status, btn) {
   // First rebuild helios_geometry.json with new positions
   if (status) { status.textContent = 'Rebuilding geometry...'; status.style.color = '#8b949e'; }
   try {
-    const r = await fetch(`/api/rebuild_geo?firstPos=${newFirstPos}&recoilPos=${newRDTPos}`);
+    const r = await fetch(`/api/rebuild_geo?firstPos=${newFirstPos}&recoilPos=${newRDTPos}&Bfield=${GEO ? GEO.Bfield : -3}&config_source=manual`);
     const d = await r.json();
     if (!d.ok) { if(status){ status.textContent = 'Rebuild failed: ' + d.error; status.style.color = '#ff7b72'; } if(btn) btn.disabled=false; return; }
   } catch(e) {
@@ -1596,16 +1600,18 @@ document.getElementById('apply-geo-btn').addEventListener('click', applyGeometry
 // ═══════════════════════════════════════════════════════════════════
 animate();
 setLoadingProgress(80, 'Loading geometry...');
-loadReactionJson();
 fetch('helios_geometry.json')
   .then(r => r.json())
   .then(data => {
     setLoadingProgress(95, 'Building scene...');
     GEO = data;
     buildScene();
+    // Load reaction after scene is built so buildBeamArrow/buildTarget have full context.
+    // Always load from saved helios_reaction.json regardless of config_source.
+    loadReactionJson();
     // Sync geometry panel from loaded JSON
     document.getElementById('bfield').value = data.Bfield;
-    document.getElementById('bfield-val').value = parseFloat(data.Bfield).toFixed(1);
+    document.getElementById('bfield-val').value = parseFloat(data.Bfield).toFixed(2);
     if (data.firstPos !== undefined) {
       document.getElementById('array-pos').value = data.firstPos;
     }
@@ -1624,6 +1630,84 @@ fetch('helios_geometry.json')
     if (lm) { lm.textContent = '✕ Failed to load helios_geometry.json'; lm.style.color='#ff7b72'; }
     console.error(e);
   });
+// ═══════════════════════════════════════════════════════════════════
+// MPEG RECORDING  (MediaRecorder → video/mp4 or webm fallback)
+// ═══════════════════════════════════════════════════════════════════
+let _recorder = null;
+let _recChunks = [];
+let _recInterval = null;
+
+function toggleRecording() {
+  if (_recorder && _recorder.state === 'recording') {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+function startRecording() {
+  const btn    = document.getElementById('record-btn');
+  const status = document.getElementById('record-status');
+
+  // Prefer mp4/H.264 if the browser supports it, fall back to webm/VP9
+  const mimeTypes = [
+    'video/mp4;codecs=avc1',
+    'video/mp4',
+    'video/webm;codecs=vp9',
+    'video/webm',
+  ];
+  const mime = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+  const ext  = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+
+  // Capture the Three.js canvas at up to 60 fps
+  const stream = renderer.domElement.captureStream(60);
+  _recChunks = [];
+  _recorder  = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000 });
+
+  _recorder.ondataavailable = e => { if (e.data && e.data.size > 0) _recChunks.push(e.data); };
+
+  _recorder.onstop = () => {
+    clearInterval(_recInterval);
+    const blob = new Blob(_recChunks, { type: mime });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.href     = url;
+    a.download = `helios_${ts}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+    _recChunks = [];
+    btn.textContent  = '⏺ Record MPEG';
+    btn.style.color  = '#f85149';
+    btn.style.borderColor = '#f85149';
+    status.textContent = `Saved as .${ext}`;
+    setTimeout(() => { status.textContent = ''; }, 4000);
+  };
+
+  _recorder.start(100);  // collect data every 100 ms
+
+  // Live elapsed-time counter
+  let secs = 0;
+  _recInterval = setInterval(() => {
+    secs++;
+    const m = String(Math.floor(secs / 60)).padStart(2, '0');
+    const s = String(secs % 60).padStart(2, '0');
+    status.textContent = '● REC ' + m + ':' + s;
+  }, 1000);
+
+  btn.textContent  = '⏹ Stop';
+  btn.style.color  = '#ff7b72';
+  btn.style.borderColor = '#ff7b72';
+  status.textContent = '● REC 00:00';
+}
+
+function stopRecording() {
+  if (_recorder && _recorder.state === 'recording') {
+    _recorder.stop();
+    _recorder = null;
+  }
+}
+
 </script>
 </body>
 </html>

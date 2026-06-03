@@ -6,19 +6,13 @@ Serves static files + API endpoints.
 
 import http.server, json, os, socketserver, subprocess, sys, threading, urllib.request, urllib.error
 
-# Single source of truth — element symbols indexed by Z (Z=0 sentinel for neutron in some contexts)
-# Used by parse_reaction_config, /api/ptolemy reaction string, and mass-table lookups.
-ELEMENT_SYMBOLS = [
-    'n','H','He','Li','Be','B','C','N','O','F','Ne',
-    'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
-    'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',
-    'Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr',
-    'Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn',
-    'Sb','Te','I','Xe','Cs','Ba','La','Ce','Pr','Nd',
-]
+# Element symbols and element_symbol() — imported from build_reaction.py (single source of truth)
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from build_reaction import ELEMENT_SYMBOLS, element_symbol
+from build_geometry import parse_detgeo, parse_reaction_config
 def sym_for_Z(Z):
-    Z = int(Z)
-    return ELEMENT_SYMBOLS[Z] if 0 <= Z < len(ELEMENT_SYMBOLS) else f'Z{Z}'
+    return element_symbol(int(Z))
 
 # ── Mass table cache — parsed once at startup, reused for all /api/mass calls ──
 _MASS_CACHE = None
@@ -50,6 +44,108 @@ DETECTOR_GEO   = os.path.join(DIGIOS_WORKING, 'detectorGeo.txt')
 REACTION_CFG   = os.path.join(DIGIOS_WORKING, 'reactionConfig.txt')
 BUILD_GEO_PY   = os.path.join(os.path.dirname(DIR), 'build_geometry.py')
 GEO_JSON       = os.path.join(os.path.dirname(DIR), 'helios_geometry.json')
+
+def ensure_default_files():
+    """Create default helios_geometry.json and helios_reaction.json if missing.
+    Tries digios first; falls back to built-in defaults so the viewer works on a fresh clone."""
+    import subprocess, sys
+
+    # ── helios_geometry.json ──────────────────────────────────────────────────
+    if not os.path.exists(GEO_JSON):
+        created = False
+        if os.path.exists(DETECTOR_GEO) and os.path.exists(BUILD_GEO_PY):
+            r = subprocess.run([sys.executable, BUILD_GEO_PY, DETECTOR_GEO, GEO_JSON],
+                               capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                print('[server] helios_geometry.json created from detectorGeo.txt')
+                created = True
+        if not created:
+            # Built-in default: 6×4 upstream array, typical HELIOS geometry
+            default_geo = {
+                "config_source": "default",
+                "Bfield": -2.85,
+                "bore": 462.5,
+                "perpDist": 11.5,
+                "width": 10.0,
+                "length": 50.0,
+                "recoilPos": 350.0,
+                "recoilInner": 10.0,
+                "recoilOuter": 40.2,
+                "recoilPos1": 0.0,
+                "recoilPos2": 0.0,
+                "elumPos1": 0.0,
+                "elumPos2": 0.0,
+                "blocker": 0.0,
+                "firstPos": -100.0,
+                "facing": "Out",
+                "nDet": 6,
+                "mDet": 4,
+                "zMin": -394.5,
+                "zMax": -100.0,
+                "detectors": _make_default_detectors(),
+            }
+            with open(GEO_JSON, 'w') as f:
+                json.dump(default_geo, f, indent=2)
+            print('[server] helios_geometry.json created with built-in defaults')
+
+    # ── helios_reaction.json ──────────────────────────────────────────────────
+    if not os.path.exists(HELIOS_REACTION_JSON):
+        default_rx = {
+            "config_source": "default",
+            "beam_A": 32, "beam_Z": 14,
+            "target_A": 2, "target_Z": 1,
+            "recoil_light_A": 1, "recoil_light_Z": 1,
+            "beam_energy_MeVu": 8.8,
+            "beam_label": "32Si", "target_label": "2H",
+            "recoil_light_label": "1H", "recoil_heavy_label": "33Si",
+            "reaction_str": "32Si(2H,1H)33Si",
+            "Q": None, "betaCM": None,
+            "mass_b": None, "charge_b": 1,
+            "mass_B": None, "charge_B": 14,
+            "Ma": None, "Mt": None, "Ecm": None,
+        }
+        # Try to build it properly if build_reaction.py exists
+        if os.path.exists(BUILD_REACTION_PY):
+            with open(HELIOS_REACTION_JSON, 'w') as f:
+                json.dump(default_rx, f, indent=2)
+            r = subprocess.run([sys.executable, BUILD_REACTION_PY, HELIOS_REACTION_JSON],
+                               capture_output=True, text=True, timeout=15)
+            if r.returncode != 0:
+                print(f'[server] build_reaction.py failed: {r.stderr.strip()}')
+            else:
+                print('[server] helios_reaction.json created from defaults + build_reaction.py')
+        else:
+            with open(HELIOS_REACTION_JSON, 'w') as f:
+                json.dump(default_rx, f, indent=2)
+            print('[server] helios_reaction.json created with built-in defaults')
+
+
+def _make_default_detectors():
+    """Generate 6x4 upstream detector array with default offsets."""
+    import math
+    firstPos = -100.0
+    length   = 50.0
+    perpDist = 11.5
+    pos_offsets = [0.0, 58.6, 117.9, 176.8, 235.8, 294.5]
+    nDet, mDet = len(pos_offsets), 4
+    # z_near for upstream: firstPos - offset (nearest det has offset=0)
+    detectors = []
+    for col_idx, offset in enumerate(pos_offsets):
+        z_near   = round(firstPos - offset, 2)
+        z_center = round(z_near - length / 2, 2)
+        for row in range(mDet):
+            phi = 2 * math.pi / mDet * row
+            detectors.append({
+                "id": col_idx * mDet + row,
+                "row": row, "col": col_idx,
+                "phi_deg": round(math.degrees(phi), 2),
+                "z_near": z_near, "z_center": z_center, "z": z_center,
+                "x": round(perpDist * math.cos(phi), 4),
+                "y": round(perpDist * math.sin(phi), 4),
+                "length": length, "width": 10.0,
+            })
+    return detectors
+
 
 def read_mcp_config():
     """Read mcp.json, return dict with nds_url."""
@@ -177,84 +273,9 @@ def mcp_tool_call(nds_url, tool_name, arguments, timeout=15):
         # Give the reader a moment to exit cleanly
         t.join(timeout=1.0)
 
-def parse_detgeo(path):
-    """Parse detectorGeo.txt into a dict."""
-    keys = [
-        'Bfield', 'Bfield_theta', 'bore', 'perpDist', 'width', 'length',
-        'recoilPos', 'recoilInner', 'recoilOuter', 'isCoincident',
-        'recoilPos1', 'recoilPos2', 'elumPos1', 'elumPos2', 'blocker',
-        'firstPos', 'eSigma', 'zSigma', 'facing', 'mDet',
-    ]
-    values = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            tok = line.split()[0]
-            values.append(tok)
 
-    result = {}
-    for i, k in enumerate(keys):
-        if i < len(values):
-            try:
-                result[k] = float(values[i])
-            except ValueError:
-                result[k] = values[i]
 
-    # Remaining = detector near-positions
-    det_pos = []
-    for v in values[len(keys):]:
-        try:
-            det_pos.append(float(v))
-        except ValueError:
-            pass
-    result['detPos'] = det_pos
-    result['nDet'] = len(det_pos)
 
-    # Compute firstPos and zRange for display
-    first = result.get('firstPos', 0)
-    length = result.get('length', 0)
-    nDet = result['nDet']
-    if nDet > 0 and det_pos:
-        if first < 0:
-            result['zMin'] = first - det_pos[-1] - length
-            result['zMax'] = first - det_pos[0]
-        else:
-            result['zMin'] = first + det_pos[0]
-            result['zMax'] = first + det_pos[-1] + length
-    return result
-
-def parse_reaction_config(path):
-    """Parse reactionConfig.txt into a dict."""
-    keys = [
-        'beam_A', 'beam_Z', 'target_A', 'target_Z',
-        'recoil_light_A', 'recoil_light_Z', 'beam_energy_MeVu',
-        'beam_energy_sigma', 'beam_angle', 'beam_emittance',
-        'x_offset', 'y_offset', 'n_events', 'isTargetScattering',
-        'target_density', 'target_thickness',
-    ]
-    values = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            tok = line.split()[0]
-            values.append(tok)
-    result = {}
-    for i, k in enumerate(keys):
-        if i < len(values):
-            try:
-                result[k] = float(values[i])
-            except ValueError:
-                result[k] = values[i]
-    # Derived: beam/target/recoil labels e.g. "32Si"
-    if 'beam_A' in result and 'beam_Z' in result:
-        A = int(result['beam_A']);  Z  = int(result['beam_Z']);   result['beam_label']         = f'{A}{sym_for_Z(Z)}'
-        At = int(result.get('target_A', 2)); Zt = int(result.get('target_Z', 1));        result['target_label']       = f'{At}{sym_for_Z(Zt)}'
-        Al = int(result.get('recoil_light_A', 1)); Zl = int(result.get('recoil_light_Z', 1)); result['recoil_light_label'] = f'{Al}{sym_for_Z(Zl)}'
-    return result
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -329,7 +350,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         [sys.executable, BUILD_GEO_PY, DETECTOR_GEO, GEO_JSON],
                         capture_output=True, text=True, timeout=10
                     )
-                    if r.returncode != 0:
+                    if r.returncode == 0:
+                        # Stamp config_source=digios into geometry JSON
+                        try:
+                            with open(GEO_JSON) as _gf: _gd = json.load(_gf)
+                            _gd['config_source'] = 'digios'
+                            with open(GEO_JSON, 'w') as _gf: json.dump(_gd, _gf, indent=2)
+                        except Exception: pass
+                    else:
                         result['errors'].append(f'rebuild_geo: {r.stderr.strip()}')
                 except Exception as e:
                     result['errors'].append(f'detectorGeo: {e}')
@@ -347,7 +375,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         'target_A': rc.get('target_A'), 'target_Z': rc.get('target_Z'),
                         'recoil_light_A': rc.get('recoil_light_A'), 'recoil_light_Z': rc.get('recoil_light_Z'),
                         'beam_energy_MeVu': rc.get('beam_energy_MeVu'),
-                        'Bfield': result['detGeo'].get('Bfield', -3.0) if 'detGeo' in result else -3.0,
+                        'config_source': 'digios',
                     }
                     with open(HELIOS_REACTION_JSON, 'w') as f:
                         json.dump(rxData, f, indent=2)
@@ -378,13 +406,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             else:
                 try:
                     sys.path.insert(0, os.path.dirname(DIR))
-                    from build_reaction import element_symbol
                     A = Z = None
                     if 'AZ' in params:
                         import re
                         az = params['AZ'][0].strip()
                         m = re.match(r'^(\d+)([A-Za-z]+)$', az)
-                        if m: A,Z = int(m.group(1)), next((i for i,s in enumerate(ELEMENT_SYMBOLS) if s.lower()==m.group(2).lower()), None)
+                        if m:
+                            sym = m.group(2)
+                            # Case-sensitive: canonicalize to Title-case so 'N' != 'n'
+                            sym_canon = sym if len(sym)==1 else sym[0].upper()+sym[1:].lower()
+                            A,Z = int(m.group(1)), next((i for i,s in enumerate(ELEMENT_SYMBOLS) if s==sym_canon), None)
                     elif 'A' in params and 'Z' in params:
                         A,Z = int(params['A'][0]), int(params['Z'][0])
                     if A is None or Z is None:
@@ -449,6 +480,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     cmd += ['--recoilPos', params['recoilPos'][0]]
                 r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
                 if r.returncode == 0:
+                    # Stamp config_source into the written geometry JSON
+                    source = params.get('config_source', ['manual'])[0]
+                    try:
+                        with open(GEO_JSON) as _gf: _gd = json.load(_gf)
+                        _gd['config_source'] = source
+                        if 'Bfield' in params:
+                            _gd['Bfield'] = float(params['Bfield'][0])
+                        with open(GEO_JSON, 'w') as _gf: json.dump(_gd, _gf, indent=2)
+                    except Exception: pass
                     self.send_json({'ok': True, 'output': r.stdout.strip()})
                 else:
                     self.send_json({'ok': False, 'error': r.stderr.strip()}, 500)
@@ -483,6 +523,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # POST: save body to helios_reaction.json + run build_reaction.py in one step
             try:
                 data = json.loads(body)
+                # Preserve or set config_source; caller may pass it explicitly
+                if 'config_source' not in data:
+                    data['config_source'] = 'manual'
                 with open(HELIOS_REACTION_JSON, 'w') as f:
                     json.dump(data, f, indent=2)
                 python = sys.executable
@@ -767,6 +810,7 @@ class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 if __name__ == '__main__':
     os.chdir(DIR)
     _get_masses()  # warm up mass cache at startup
+    ensure_default_files()  # create geometry/reaction JSON if missing
     with ThreadedTCPServer(('', PORT), Handler) as httpd:
         print(f'HELIOS 3D viewer: http://localhost:{PORT}')
         print(f'From network:     http://192.168.1.101:{PORT}')

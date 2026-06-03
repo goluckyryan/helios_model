@@ -85,20 +85,24 @@ def get_mass(masses, Z, A, label='?'):
     print(f"  WARNING: ({Z},{A}) [{label}] not in mass table, using rough estimate: {mass:.4f} MeV")
     return mass
 
+# Single source of truth for element symbols (Z=0..118)
+ELEMENT_SYMBOLS = [
+    'n','H','He','Li','Be','B','C','N','O','F','Ne',
+    'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
+    'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',
+    'Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr',
+    'Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn',
+    'Sb','Te','I','Xe','Cs','Ba','La','Ce','Pr','Nd',
+    'Pm','Sm','Eu','Gd','Tb','Dy','Ho','Er','Tm','Yb',
+    'Lu','Hf','Ta','W','Re','Os','Ir','Pt','Au','Hg',
+    'Tl','Pb','Bi','Po','At','Rn','Fr','Ra','Ac','Th',
+    'Pa','U','Np','Pu','Am','Cm','Bk','Cf','Es','Fm',
+    'Md','No','Lr','Rf','Db','Sg','Bh','Hs','Mt','Ds',
+    'Rg','Cn','Nh','Fl','Mc','Lv','Ts','Og'
+]
+
 def element_symbol(Z):
-    symbols = [
-        'n','H','He','Li','Be','B','C','N','O','F','Ne',
-        'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
-        'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',
-        'Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr',
-        'Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn',
-        'Sb','Te','I','Xe','Cs','Ba','La','Ce','Pr','Nd',
-        'Pm','Sm','Eu','Gd','Tb','Dy','Ho','Er','Tm','Yb',
-        'Lu','Hf','Ta','W','Re','Os','Ir','Pt','Au','Hg',
-        'Tl','Pb','Bi','Po','At','Rn','Fr','Ra','Ac','Th',
-        'Pa','U','Np','Pu','Am','Cm','Bk','Cf','Es','Fm',
-    ]
-    return symbols[Z] if 0 <= Z < len(symbols) else f'Z{Z}'
+    return ELEMENT_SYMBOLS[Z] if 0 <= Z < len(ELEMENT_SYMBOLS) else f'Z{Z}'
 
 def compute_kinematics(reaction, masses):
     """
