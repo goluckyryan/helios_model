@@ -874,7 +874,8 @@ function pruneOldTracks() {
     const old = eventHistory.shift();
     [old.lightAnim, old.heavyAnim].forEach(anim => {
       if (anim) {
-        animations = animations.filter(a => a !== anim);
+        const idx = animations.indexOf(anim);
+        if (idx !== -1) animations.splice(idx, 1);  // O(n) splice, avoids new array alloc
         disposeAnim(anim);
       }
     });

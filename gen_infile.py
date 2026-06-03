@@ -28,17 +28,12 @@ LIGHT_MASSES = {
     (4,2): 3727.37941,  # alpha
 }
 
-ELEM = ['n','H','He','Li','Be','B','C','N','O','F','Ne',
-        'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
-        'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',
-        'Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr',
-        'Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn']
+# Import element symbols from build_reaction (single source of truth)
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from build_reaction import ELEMENT_SYMBOLS as ELEM, element_symbol as sym
 
 L_MAP = {'s':0,'p':1,'d':2,'f':3,'g':4,'h':5,'i':6,'j':7}
-
-
-def sym(Z):
-    return ELEM[Z] if 0 <= Z < len(ELEM) else f'Z{Z}'
 
 
 def parse_j(s):

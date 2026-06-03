@@ -7,8 +7,10 @@ Serves static files + API endpoints.
 import http.server, json, os, socketserver, subprocess, sys, threading, urllib.request, urllib.error
 
 # Element symbols and element_symbol() — imported from build_reaction.py (single source of truth)
-import sys as _sys, os as _os
-_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+# Add parent dir to path once so build_reaction and build_geometry are importable
+_parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
 from build_reaction import ELEMENT_SYMBOLS, element_symbol
 from build_geometry import parse_detgeo, parse_reaction_config
 def sym_for_Z(Z):
@@ -16,19 +18,22 @@ def sym_for_Z(Z):
 
 # ── Mass table cache — parsed once at startup, reused for all /api/mass calls ──
 _MASS_CACHE = None
+_MASS_LOCK  = __import__('threading').Lock()
 _MASS_PATH  = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mass20.txt'))
 
 def _get_masses():
-    """Return cached AME mass dict, parsing the table on first call. Returns None if missing."""
+    """Return cached AME mass dict, parsing the table on first call. Thread-safe. Returns None if missing."""
     global _MASS_CACHE
-    if _MASS_CACHE is not None:
+    if _MASS_CACHE is not None:  # fast path — no lock needed after first load
         return _MASS_CACHE
-    if not os.path.exists(_MASS_PATH):
-        return None
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from build_reaction import parse_mass_table
-    _MASS_CACHE = parse_mass_table(_MASS_PATH)
+    with _MASS_LOCK:
+        if _MASS_CACHE is not None:  # re-check inside lock
+            return _MASS_CACHE
+        if not os.path.exists(_MASS_PATH):
+            return None
+        from build_reaction import parse_mass_table
+        _MASS_CACHE = parse_mass_table(_MASS_PATH)
     return _MASS_CACHE
 
 PORT = 8765
@@ -46,52 +51,89 @@ BUILD_GEO_PY   = os.path.join(os.path.dirname(DIR), 'build_geometry.py')
 GEO_JSON       = os.path.join(os.path.dirname(DIR), 'helios_geometry.json')
 
 def ensure_default_files():
-    """Create default helios_geometry.json and helios_reaction.json if missing.
-    Tries digios first; falls back to built-in defaults so the viewer works on a fresh clone."""
-    import subprocess, sys
+    """On startup: check config_source in existing JSONs and act accordingly.
 
-    # ── helios_geometry.json ──────────────────────────────────────────────────
-    if not os.path.exists(GEO_JSON):
-        created = False
-        if os.path.exists(DETECTOR_GEO) and os.path.exists(BUILD_GEO_PY):
-            r = subprocess.run([sys.executable, BUILD_GEO_PY, DETECTOR_GEO, GEO_JSON],
-                               capture_output=True, text=True, timeout=10)
-            if r.returncode == 0:
-                print('[server] helios_geometry.json created from detectorGeo.txt')
-                created = True
-        if not created:
-            # Built-in default: 6×4 upstream array, typical HELIOS geometry
-            default_geo = {
-                "config_source": "default",
-                "Bfield": -2.85,
-                "bore": 462.5,
-                "perpDist": 11.5,
-                "width": 10.0,
-                "length": 50.0,
-                "recoilPos": 350.0,
-                "recoilInner": 10.0,
-                "recoilOuter": 40.2,
-                "recoilPos1": 0.0,
-                "recoilPos2": 0.0,
-                "elumPos1": 0.0,
-                "elumPos2": 0.0,
-                "blocker": 0.0,
-                "firstPos": -100.0,
-                "facing": "Out",
-                "nDet": 6,
-                "mDet": 4,
-                "zMin": -394.5,
-                "zMax": -100.0,
-                "detectors": _make_default_detectors(),
+    Rules:
+      - JSON missing               → try digios; if unavailable write hardcoded defaults (manual)
+      - JSON exists, source=digios → try to reload from digios; if that fails, leave file as-is
+      - JSON exists, source=manual → leave untouched (user saved this deliberately)
+      - JSON exists, source=default/missing → treat as digios (fresh clone)
+    """
+    import subprocess
+
+    def _read_source(path):
+        try:
+            with open(path) as f:
+                d = json.load(f)
+                # default/missing config_source → treat as manual (conservative)
+                return d.get('config_source', 'manual') or 'manual'
+        except Exception:
+            return None  # file missing or unreadable
+
+    def _rebuild_geo_from_digios():
+        """Try to build helios_geometry.json from detectorGeo.txt. Returns True on success."""
+        if not (os.path.exists(DETECTOR_GEO) and os.path.exists(BUILD_GEO_PY)):
+            return False
+        r = subprocess.run([sys.executable, BUILD_GEO_PY, DETECTOR_GEO, GEO_JSON],
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            # Stamp digios source
+            try:
+                with open(GEO_JSON) as f: gd = json.load(f)
+                gd['config_source'] = 'digios'
+                with open(GEO_JSON, 'w') as f: json.dump(gd, f, indent=2)
+            except Exception: pass
+            print('[server] helios_geometry.json loaded from detectorGeo.txt (digios)')
+            return True
+        print(f'[server] build_geometry.py failed: {r.stderr.strip()}')
+        return False
+
+    def _write_default_geo():
+        """Write hardcoded geometry defaults, stamped manual."""
+        default_geo = {
+            "config_source": "manual",
+            "Bfield": -2.85, "bore": 462.5, "perpDist": 11.5,
+            "width": 10.0, "length": 50.0, "recoilPos": 350.0,
+            "recoilInner": 10.0, "recoilOuter": 40.2,
+            "recoilPos1": 0.0, "recoilPos2": 0.0,
+            "elumPos1": 0.0, "elumPos2": 0.0, "blocker": 0.0,
+            "firstPos": -100.0, "facing": "Out",
+            "nDet": 6, "mDet": 4, "zMin": -394.5, "zMax": -100.0,
+            "detectors": _make_default_detectors(),
+        }
+        with open(GEO_JSON, 'w') as f: json.dump(default_geo, f, indent=2)
+        print('[server] helios_geometry.json created with built-in defaults (manual)')
+
+    def _rebuild_rx_from_digios():
+        """Try to build helios_reaction.json from reactionConfig.txt. Returns True on success."""
+        if not os.path.exists(REACTION_CFG):
+            return False
+        try:
+            rc = parse_reaction_config(REACTION_CFG)
+            rxData = {
+                'beam_A': rc.get('beam_A'), 'beam_Z': rc.get('beam_Z'),
+                'target_A': rc.get('target_A'), 'target_Z': rc.get('target_Z'),
+                'recoil_light_A': rc.get('recoil_light_A'), 'recoil_light_Z': rc.get('recoil_light_Z'),
+                'beam_energy_MeVu': rc.get('beam_energy_MeVu'),
+                'config_source': 'digios',
             }
-            with open(GEO_JSON, 'w') as f:
-                json.dump(default_geo, f, indent=2)
-            print('[server] helios_geometry.json created with built-in defaults')
+            with open(HELIOS_REACTION_JSON, 'w') as f: json.dump(rxData, f, indent=2)
+            if os.path.exists(BUILD_REACTION_PY):
+                r = subprocess.run([sys.executable, BUILD_REACTION_PY, HELIOS_REACTION_JSON],
+                                   capture_output=True, text=True, timeout=15)
+                if r.returncode != 0:
+                    print(f'[server] build_reaction.py failed: {r.stderr.strip()}')
+                    return False
+            print('[server] helios_reaction.json loaded from reactionConfig.txt (digios)')
+            return True
+        except Exception as e:
+            print(f'[server] reaction config load failed: {e}')
+            return False
 
-    # ── helios_reaction.json ──────────────────────────────────────────────────
-    if not os.path.exists(HELIOS_REACTION_JSON):
+    def _write_default_rx():
+        """Write hardcoded reaction defaults, stamped manual."""
         default_rx = {
-            "config_source": "default",
+            "config_source": "manual",
             "beam_A": 32, "beam_Z": 14,
             "target_A": 2, "target_Z": 1,
             "recoil_light_A": 1, "recoil_light_Z": 1,
@@ -104,20 +146,37 @@ def ensure_default_files():
             "mass_B": None, "charge_B": 14,
             "Ma": None, "Mt": None, "Ecm": None,
         }
-        # Try to build it properly if build_reaction.py exists
         if os.path.exists(BUILD_REACTION_PY):
-            with open(HELIOS_REACTION_JSON, 'w') as f:
-                json.dump(default_rx, f, indent=2)
+            with open(HELIOS_REACTION_JSON, 'w') as f: json.dump(default_rx, f, indent=2)
             r = subprocess.run([sys.executable, BUILD_REACTION_PY, HELIOS_REACTION_JSON],
                                capture_output=True, text=True, timeout=15)
             if r.returncode != 0:
-                print(f'[server] build_reaction.py failed: {r.stderr.strip()}')
-            else:
-                print('[server] helios_reaction.json created from defaults + build_reaction.py')
+                with open(HELIOS_REACTION_JSON, 'w') as f: json.dump(default_rx, f, indent=2)
         else:
-            with open(HELIOS_REACTION_JSON, 'w') as f:
-                json.dump(default_rx, f, indent=2)
-            print('[server] helios_reaction.json created with built-in defaults')
+            with open(HELIOS_REACTION_JSON, 'w') as f: json.dump(default_rx, f, indent=2)
+        print('[server] helios_reaction.json created with built-in defaults (manual)')
+
+    # ── helios_geometry.json ──────────────────────────────────────────────────
+    geo_source = _read_source(GEO_JSON)
+    if geo_source is None:                        # missing
+        if not _rebuild_geo_from_digios():
+            _write_default_geo()
+    elif geo_source == 'digios':                  # exists, digios → refresh
+        if not _rebuild_geo_from_digios():
+            print('[server] helios_geometry.json: digios unavailable, keeping existing file')
+    else:                                         # manual/default/unknown → leave untouched
+        print(f'[server] helios_geometry.json: source={geo_source!r}, keeping as-is')
+
+    # ── helios_reaction.json ──────────────────────────────────────────────────
+    rx_source = _read_source(HELIOS_REACTION_JSON)
+    if rx_source is None:                         # missing
+        if not _rebuild_rx_from_digios():
+            _write_default_rx()
+    elif rx_source == 'digios':                   # exists, digios → refresh
+        if not _rebuild_rx_from_digios():
+            print('[server] helios_reaction.json: digios unavailable, keeping existing file')
+    else:                                         # manual/default/unknown → leave untouched
+        print(f'[server] helios_reaction.json: source={rx_source!r}, keeping as-is')
 
 
 def _make_default_detectors():
@@ -405,7 +464,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({'ok': False, 'error': 'mass20.txt not found'}, 404)
             else:
                 try:
-                    sys.path.insert(0, os.path.dirname(DIR))
                     A = Z = None
                     if 'AZ' in params:
                         import re
