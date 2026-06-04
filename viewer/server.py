@@ -1,34 +1,46 @@
 #!/usr/bin/env python3
 """
-HELIOS 3D Model viewer server — port 8765
-Serves static files + API endpoints.
+HELIOS 3D viewer server — port 8765
+Single source of runtime state: helios_state.json
+helios_config.json is read-only (element symbols, SS presets).
 """
 
-import http.server, json, os, socketserver, subprocess, sys, threading, urllib.request, urllib.error
+import http.server, json, math, os, socketserver, subprocess, sys, threading, urllib.request, urllib.error
 
-# Element symbols and element_symbol() — imported from build_reaction.py (single source of truth)
-# Add parent dir to path once so build_reaction and build_geometry are importable
+# ── Path setup ────────────────────────────────────────────────────────────────
 _parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _parent_dir not in sys.path:
     sys.path.insert(0, _parent_dir)
-from build_reaction import ELEMENT_SYMBOLS, element_symbol
-from build_geometry import parse_detgeo, parse_reaction_config
-def sym_for_Z(Z):
-    return element_symbol(int(Z))
+from build_reaction import (ELEMENT_SYMBOLS, element_symbol,
+                             compute_kinematics, compute_kinematics_from_state)
 
-# ── Mass table cache — parsed once at startup, reused for all /api/mass calls ──
+PORT             = 8765
+DIR              = os.path.dirname(os.path.abspath(__file__))
+ROOT             = os.path.dirname(DIR)          # helios_model/
+STATE_JSON       = os.path.join(ROOT, 'helios_state.json')
+CONFIG_JSON      = os.path.join(ROOT, 'helios_config.json')
+MCP_JSON         = os.path.join(ROOT, 'mcp.json')
+DEFAULT_NDS_URL  = 'http://192.168.203.75:65432/sse'
+BUILD_REACTION_PY = os.path.join(ROOT, 'build_reaction.py')
+BUILD_GEO_PY     = os.path.join(ROOT, 'build_geometry.py')
+
+DIGIOS_WORKING   = os.path.expanduser('~/digios/analysis/working')
+DETECTOR_GEO     = os.path.join(DIGIOS_WORKING, 'detectorGeo.txt')
+REACTION_CFG     = os.path.join(DIGIOS_WORKING, 'reactionConfig.txt')
+PTOLEMY_BIN      = os.path.expanduser('~/digios/analysis/Cleopatra/ptolemy')
+GEN_INFILE_PY    = os.path.join(ROOT, 'gen_infile.py')
+
+# ── Mass table cache ──────────────────────────────────────────────────────────
 _MASS_CACHE = None
-_MASS_LOCK  = __import__('threading').Lock()
-_MASS_PATH  = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mass20.txt'))
+_MASS_LOCK  = threading.Lock()
+_MASS_PATH  = os.path.join(ROOT, 'mass20.txt')
 
 def _get_masses():
-    """Return cached AME mass dict, parsing the table on first call. Thread-safe. Returns None if missing."""
     global _MASS_CACHE
-    if _MASS_CACHE is not None:  # fast path — no lock needed after first load
+    if _MASS_CACHE is not None:
         return _MASS_CACHE
     with _MASS_LOCK:
-        if _MASS_CACHE is not None:  # re-check inside lock
+        if _MASS_CACHE is not None:
             return _MASS_CACHE
         if not os.path.exists(_MASS_PATH):
             return None
@@ -36,209 +48,257 @@ def _get_masses():
         _MASS_CACHE = parse_mass_table(_MASS_PATH)
     return _MASS_CACHE
 
-PORT = 8765
-DIR  = os.path.dirname(os.path.abspath(__file__))
+# ── helios_config.json (read-only, cached) ────────────────────────────────────
+_CONFIG_CACHE = None
+def _get_config():
+    global _CONFIG_CACHE
+    if _CONFIG_CACHE is not None:
+        return _CONFIG_CACHE
+    if os.path.exists(CONFIG_JSON):
+        with open(CONFIG_JSON) as f:
+            _CONFIG_CACHE = json.load(f)
+    else:
+        _CONFIG_CACHE = {'element_symbols': ELEMENT_SYMBOLS, 'shorthands': {}, 'spectrometers': {}}
+    return _CONFIG_CACHE
 
-# Paths to digios working files
-DIGIOS_WORKING = os.path.expanduser('~/digios/analysis/working')
-HELIOS_REACTION_JSON = os.path.join(os.path.dirname(DIR), 'helios_reaction.json')
-MCP_JSON            = os.path.join(os.path.dirname(DIR), 'mcp.json')
-DEFAULT_NDS_URL     = 'http://192.168.203.75:65432/sse'
-BUILD_REACTION_PY    = os.path.join(os.path.dirname(DIR), 'build_reaction.py')
-DETECTOR_GEO   = os.path.join(DIGIOS_WORKING, 'detectorGeo.txt')
-REACTION_CFG   = os.path.join(DIGIOS_WORKING, 'reactionConfig.txt')
-BUILD_GEO_PY   = os.path.join(os.path.dirname(DIR), 'build_geometry.py')
-GEO_JSON       = os.path.join(os.path.dirname(DIR), 'helios_geometry.json')
+# ── State management ──────────────────────────────────────────────────────────
 
-def ensure_default_files():
-    """On startup: check config_source in existing JSONs and act accordingly.
+def _default_state():
+    """Return default state using HELIOS preset from config."""
+    cfg = _get_config()
+    preset = cfg.get('spectrometers', {}).get('HELIOS', {})
+    return {
+        'config_source': 'manual',
+        'ss_type': 'HELIOS',
+        'geometry': {
+            'firstPos':    preset.get('firstPos',   -100.0),
+            'recoilPos':   preset.get('recoilPos',   350.0),
+            'Bfield':      preset.get('Bfield',       -2.85),
+            'recoilInner': preset.get('recoilInner',   10.0),
+            'recoilOuter': preset.get('recoilOuter',   40.2),
+        },
+        'reaction': {
+            'beam_A': 32, 'beam_Z': 14,
+            'target_A': 2, 'target_Z': 1,
+            'light_A': 1,  'light_Z': 1,
+            'beam_energy_MeVu': 8.8,
+        },
+        'computed': {},
+    }
 
-    Rules:
-      - JSON missing               → try digios; if unavailable write hardcoded defaults (manual)
-      - JSON exists, source=digios → try to reload from digios; if that fails, leave file as-is
-      - JSON exists, source=manual → leave untouched (user saved this deliberately)
-      - JSON exists, source=default/missing → treat as digios (fresh clone)
-    """
-    import subprocess
-
-    def _read_source(path):
+def read_state():
+    """Read helios_state.json, return dict. Returns default if missing/corrupt."""
+    if os.path.exists(STATE_JSON):
         try:
-            with open(path) as f:
-                d = json.load(f)
-                # default/missing config_source → treat as manual (conservative)
-                return d.get('config_source', 'manual') or 'manual'
-        except Exception:
-            return None  # file missing or unreadable
-
-    def _rebuild_geo_from_digios():
-        """Try to build helios_geometry.json from detectorGeo.txt. Returns True on success."""
-        if not (os.path.exists(DETECTOR_GEO) and os.path.exists(BUILD_GEO_PY)):
-            return False
-        r = subprocess.run([sys.executable, BUILD_GEO_PY, DETECTOR_GEO, GEO_JSON],
-                           capture_output=True, text=True, timeout=10)
-        if r.returncode == 0:
-            # Stamp digios source
-            try:
-                with open(GEO_JSON) as f: gd = json.load(f)
-                gd['config_source'] = 'digios'
-                with open(GEO_JSON, 'w') as f: json.dump(gd, f, indent=2)
-            except Exception: pass
-            print('[server] helios_geometry.json loaded from detectorGeo.txt (digios)')
-            return True
-        print(f'[server] build_geometry.py failed: {r.stderr.strip()}')
-        return False
-
-    def _write_default_geo():
-        """Write hardcoded geometry defaults, stamped manual."""
-        default_geo = {
-            "config_source": "manual",
-            "Bfield": -2.85, "bore": 462.5, "perpDist": 11.5,
-            "width": 10.0, "length": 50.0, "recoilPos": 350.0,
-            "recoilInner": 10.0, "recoilOuter": 40.2,
-            "recoilPos1": 0.0, "recoilPos2": 0.0,
-            "elumPos1": 0.0, "elumPos2": 0.0, "blocker": 0.0,
-            "firstPos": -100.0, "facing": "Out",
-            "nDet": 6, "mDet": 4, "zMin": -394.5, "zMax": -100.0,
-            "detectors": _make_default_detectors(),
-        }
-        with open(GEO_JSON, 'w') as f: json.dump(default_geo, f, indent=2)
-        print('[server] helios_geometry.json created with built-in defaults (manual)')
-
-    def _rebuild_rx_from_digios():
-        """Try to build helios_reaction.json from reactionConfig.txt. Returns True on success."""
-        if not os.path.exists(REACTION_CFG):
-            return False
-        try:
-            rc = parse_reaction_config(REACTION_CFG)
-            rxData = {
-                'beam_A': rc.get('beam_A'), 'beam_Z': rc.get('beam_Z'),
-                'target_A': rc.get('target_A'), 'target_Z': rc.get('target_Z'),
-                'recoil_light_A': rc.get('recoil_light_A'), 'recoil_light_Z': rc.get('recoil_light_Z'),
-                'beam_energy_MeVu': rc.get('beam_energy_MeVu'),
-                'config_source': 'digios',
-            }
-            with open(HELIOS_REACTION_JSON, 'w') as f: json.dump(rxData, f, indent=2)
-            if os.path.exists(BUILD_REACTION_PY):
-                r = subprocess.run([sys.executable, BUILD_REACTION_PY, HELIOS_REACTION_JSON],
-                                   capture_output=True, text=True, timeout=15)
-                if r.returncode != 0:
-                    print(f'[server] build_reaction.py failed: {r.stderr.strip()}')
-                    return False
-            print('[server] helios_reaction.json loaded from reactionConfig.txt (digios)')
-            return True
-        except Exception as e:
-            print(f'[server] reaction config load failed: {e}')
-            return False
-
-    def _write_default_rx():
-        """Write hardcoded reaction defaults, stamped manual."""
-        default_rx = {
-            "config_source": "manual",
-            "beam_A": 32, "beam_Z": 14,
-            "target_A": 2, "target_Z": 1,
-            "recoil_light_A": 1, "recoil_light_Z": 1,
-            "beam_energy_MeVu": 8.8,
-            "beam_label": "32Si", "target_label": "2H",
-            "recoil_light_label": "1H", "recoil_heavy_label": "33Si",
-            "reaction_str": "32Si(2H,1H)33Si",
-            "Q": None, "betaCM": None,
-            "mass_b": None, "charge_b": 1,
-            "mass_B": None, "charge_B": 14,
-            "Ma": None, "Mt": None, "Ecm": None,
-        }
-        if os.path.exists(BUILD_REACTION_PY):
-            with open(HELIOS_REACTION_JSON, 'w') as f: json.dump(default_rx, f, indent=2)
-            r = subprocess.run([sys.executable, BUILD_REACTION_PY, HELIOS_REACTION_JSON],
-                               capture_output=True, text=True, timeout=15)
-            if r.returncode != 0:
-                with open(HELIOS_REACTION_JSON, 'w') as f: json.dump(default_rx, f, indent=2)
-        else:
-            with open(HELIOS_REACTION_JSON, 'w') as f: json.dump(default_rx, f, indent=2)
-        print('[server] helios_reaction.json created with built-in defaults (manual)')
-
-    # ── helios_geometry.json ──────────────────────────────────────────────────
-    geo_source = _read_source(GEO_JSON)
-    if geo_source is None:                        # missing
-        if not _rebuild_geo_from_digios():
-            _write_default_geo()
-    elif geo_source == 'digios':                  # exists, digios → refresh
-        if not _rebuild_geo_from_digios():
-            print('[server] helios_geometry.json: digios unavailable, keeping existing file')
-    else:                                         # manual/default/unknown → leave untouched
-        print(f'[server] helios_geometry.json: source={geo_source!r}, keeping as-is')
-
-    # ── helios_reaction.json ──────────────────────────────────────────────────
-    rx_source = _read_source(HELIOS_REACTION_JSON)
-    if rx_source is None:                         # missing
-        if not _rebuild_rx_from_digios():
-            _write_default_rx()
-    elif rx_source == 'digios':                   # exists, digios → refresh
-        if not _rebuild_rx_from_digios():
-            print('[server] helios_reaction.json: digios unavailable, keeping existing file')
-    else:                                         # manual/default/unknown → leave untouched
-        print(f'[server] helios_reaction.json: source={rx_source!r}, keeping as-is')
-
-
-def _make_default_detectors():
-    """Generate 6x4 upstream detector array with default offsets."""
-    import math
-    firstPos = -100.0
-    length   = 50.0
-    perpDist = 11.5
-    pos_offsets = [0.0, 58.6, 117.9, 176.8, 235.8, 294.5]
-    nDet, mDet = len(pos_offsets), 4
-    # z_near for upstream: firstPos - offset (nearest det has offset=0)
-    detectors = []
-    for col_idx, offset in enumerate(pos_offsets):
-        z_near   = round(firstPos - offset, 2)
-        z_center = round(z_near - length / 2, 2)
-        for row in range(mDet):
-            phi = 2 * math.pi / mDet * row
-            detectors.append({
-                "id": col_idx * mDet + row,
-                "row": row, "col": col_idx,
-                "phi_deg": round(math.degrees(phi), 2),
-                "z_near": z_near, "z_center": z_center, "z": z_center,
-                "x": round(perpDist * math.cos(phi), 4),
-                "y": round(perpDist * math.sin(phi), 4),
-                "length": length, "width": 10.0,
-            })
-    return detectors
-
-
-def read_mcp_config():
-    """Read mcp.json, return dict with nds_url."""
-    if os.path.exists(MCP_JSON):
-        try:
-            with open(MCP_JSON) as f:
+            with open(STATE_JSON) as f:
                 return json.load(f)
         except Exception:
             pass
+    return _default_state()
+
+def write_state(state):
+    with open(STATE_JSON, 'w') as f:
+        json.dump(state, f, indent=2)
+
+def recompute_state(state):
+    """Fill state['computed'] from reaction + ss_type + geometry. Returns updated state."""
+    cfg    = _get_config()
+    ss     = state.get('ss_type', 'HELIOS')
+    geo    = state.get('geometry', {})
+    rxn    = state.get('reaction', {})
+    preset = cfg.get('spectrometers', {}).get(ss, list(cfg.get('spectrometers', {}).values() or [{}])[0] if cfg.get('spectrometers') else {})
+
+    fp = geo.get('firstPos', preset.get('firstPos', -100.0))
+
+    # Generate detectors from preset + firstPos
+    dets, z_min, z_max = _make_detectors(preset, fp)
+
+    # Compute kinematics
+    kinem = {}
+    masses = _get_masses()
+    if masses and all(k in rxn for k in ('beam_A','beam_Z','target_A','target_Z','light_A','light_Z','beam_energy_MeVu')):
+        try:
+            kinem = compute_kinematics_from_state(rxn, masses)
+        except Exception as e:
+            kinem = {'error': str(e)}
+
+    state['computed'] = {
+        **kinem,
+        'detectors': dets,
+        'zMin': z_min,
+        'zMax': z_max,
+    }
+    return state
+
+def _make_detectors(preset, first_pos):
+    """Generate detector array from SS preset + firstPos. Returns (dets, zMin, zMax)."""
+    offsets = preset.get('posOffsets', [0.0])
+    n_det   = len(offsets)
+    m_det   = int(preset.get('mDet', 4))
+    length  = float(preset.get('detLen', 50.0))
+    perp    = float(preset.get('perpDist', 11.5))
+    width   = float(preset.get('detWidth', 10.0))
+    fp      = float(first_pos)
+
+    start      = m_det // 2 if fp < 0 else 0
+    side_order = [(start + i) % m_det for i in range(m_det)]
+
+    dets = []
+    for col_idx, offset in enumerate(offsets):
+        z_near = round(fp - offset if fp < 0 else fp + offset, 4)
+        z_ctr  = round(z_near - length / 2 if fp < 0 else z_near + length / 2, 4)
+        for row in range(m_det):
+            phi = 2 * math.pi / m_det * row
+            dets.append({
+                'id': -1, 'row': row,
+                'col': n_det - 1 - col_idx,
+                'phi_deg': round(math.degrees(phi), 2),
+                'z_near': z_near, 'z_center': z_ctr, 'z': z_ctr,
+                'x': round(perp * math.cos(phi), 4),
+                'y': round(perp * math.sin(phi), 4),
+                'length': length, 'width': width,
+            })
+
+    new_id = 0
+    for s in side_order:
+        for c in range(n_det):
+            for d in dets:
+                if d['row'] == s and d['col'] == c:
+                    d['id'] = new_id; new_id += 1; break
+
+    znears = [d['z_near'] for d in dets]
+    z_min = round(min(znears) - (length if fp < 0 else 0), 4)
+    z_max = round(max(znears) + (length if fp > 0 else 0), 4)
+    return dets, z_min, z_max
+
+def _state_to_geo_json(state):
+    """Build a helios_geometry.json-compatible dict from state (for 3D viewer)."""
+    cfg    = _get_config()
+    ss     = state.get('ss_type', 'HELIOS')
+    geo    = state.get('geometry', {})
+    comp   = state.get('computed', {})
+    preset = cfg.get('spectrometers', {}).get(ss, {})
+
+    return {
+        'config_source': state.get('config_source', 'manual'),
+        'ss_type':       ss,
+        'Bfield':        geo.get('Bfield',      preset.get('Bfield',      -2.85)),
+        'bore':          preset.get('bore',       462.5),
+        'perpDist':      preset.get('perpDist',   11.5),
+        'width':         preset.get('detWidth',   10.0),
+        'length':        preset.get('detLen',     50.0),
+        'detLen':        preset.get('detLen',     50.0),
+        'detGap':        preset.get('detGap',     5.0),
+        'recoilPos':     geo.get('recoilPos',    preset.get('recoilPos',   350.0)),
+        'recoilInner':   geo.get('recoilInner',  preset.get('recoilInner', 10.0)),
+        'recoilOuter':   geo.get('recoilOuter',  preset.get('recoilOuter', 40.2)),
+        'firstPos':      geo.get('firstPos',     preset.get('firstPos',   -100.0)),
+        'facing':        preset.get('facing',    'Out'),
+        'nDet':          len(preset.get('posOffsets', [])),
+        'mDet':          preset.get('mDet',      4),
+        'zMin':          comp.get('zMin',         -394.5),
+        'zMax':          comp.get('zMax',         -100.0),
+        'detectors':     comp.get('detectors',    []),
+    }
+
+# ── Startup: ensure state exists ──────────────────────────────────────────────
+
+def ensure_state():
+    """On startup: create helios_state.json if missing, or refresh if config_source=digios."""
+
+    def _try_load_digios():
+        """Try to build state from digios files. Returns state dict or None."""
+        from build_geometry import parse_detgeo, parse_reaction_config
+        if not os.path.exists(DETECTOR_GEO) or not os.path.exists(REACTION_CFG):
+            return None
+        try:
+            dg = parse_detgeo(DETECTOR_GEO)
+            rc = parse_reaction_config(REACTION_CFG)
+            cfg = _get_config()
+            # Identify SS type by mDet
+            m = int(dg.get('mDet', 4))
+            ss = next((k for k,v in cfg.get('spectrometers',{}).items()
+                       if v.get('mDet') == m), 'HELIOS')
+            state = {
+                'config_source': 'digios',
+                'ss_type': ss,
+                'geometry': {
+                    'firstPos':    float(dg.get('firstPos',  -100.0)),
+                    'recoilPos':   float(dg.get('recoilPos',  350.0)),
+                    'Bfield':      float(dg.get('Bfield',     -2.85)),
+                    'recoilInner': float(dg.get('recoilInner', 10.0)),
+                    'recoilOuter': float(dg.get('recoilOuter', 40.2)),
+                },
+                'reaction': {
+                    'beam_A':         int(rc.get('beam_A',   32)),
+                    'beam_Z':         int(rc.get('beam_Z',   14)),
+                    'target_A':       int(rc.get('target_A',  2)),
+                    'target_Z':       int(rc.get('target_Z',  1)),
+                    'light_A':        int(rc.get('recoil_light_A', 1)),
+                    'light_Z':        int(rc.get('recoil_light_Z', 1)),
+                    'beam_energy_MeVu': float(rc.get('beam_energy_MeVu', 8.8)),
+                },
+                'computed': {},
+            }
+            recompute_state(state)
+            return state
+        except Exception as e:
+            print(f'[server] digios load failed: {e}')
+            return None
+
+    if not os.path.exists(STATE_JSON):
+        print('[server] helios_state.json missing — creating...')
+        state = _try_load_digios()
+        if state is None:
+            print('[server] digios unavailable — writing defaults (manual)')
+            state = _default_state()
+            recompute_state(state)
+        write_state(state)
+        print(f'[server] state created: ss={state["ss_type"]} source={state["config_source"]}')
+        return
+
+    # File exists — check config_source
+    state = read_state()
+    src = state.get('config_source', 'manual')
+    if src == 'digios':
+        print('[server] config_source=digios — refreshing from digios...')
+        fresh = _try_load_digios()
+        if fresh:
+            write_state(fresh)
+            print('[server] state refreshed from digios')
+        else:
+            print('[server] digios unavailable — keeping existing state')
+    else:
+        # manual — recompute computed section in case code changed
+        recompute_state(state)
+        write_state(state)
+        print(f'[server] state loaded: ss={state.get("ss_type")} source={src}')
+
+# ── MCP/NDS helpers ───────────────────────────────────────────────────────────
+
+def read_mcp_config():
+    if os.path.exists(MCP_JSON):
+        try:
+            with open(MCP_JSON) as f: return json.load(f)
+        except Exception: pass
     return {'nds_url': DEFAULT_NDS_URL}
 
 def save_mcp_config(data):
-    with open(MCP_JSON, 'w') as f:
-        json.dump(data, f, indent=2)
+    with open(MCP_JSON, 'w') as f: json.dump(data, f, indent=2)
 
 def probe_nds(url, timeout=3):
-    """Return True if the SSE endpoint responds with HTTP 200."""
     try:
         req = urllib.request.Request(url, headers={'Accept': 'text/event-stream'})
-        # We just need the headers — close immediately
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status == 200
     except Exception:
         return False
 
 def mcp_tool_call(nds_url, tool_name, arguments, timeout=15):
-    """
-    Run one MCP tool call over SSE transport.
-    Returns parsed result dict, or raises RuntimeError on failure.
-    """
     import time
     endpoint_path = None
     result_event  = threading.Event()
-    messages      = []   # SSE message payloads
+    messages      = []
     sse_error     = []
 
     def sse_reader(resp):
@@ -247,76 +307,50 @@ def mcp_tool_call(nds_url, tool_name, arguments, timeout=15):
         try:
             for raw in resp:
                 line = raw.decode('utf-8').rstrip('\n\r')
-                if line.startswith('event:'):
-                    event_type = line[6:].strip()
+                if line.startswith('event:'):   event_type = line[6:].strip()
                 elif line.startswith('data:'):
                     data = line[5:].strip()
                     if event_type == 'endpoint':
-                        endpoint_path = data
-                        ready_evt.set()
+                        endpoint_path = data; ready_evt.set()
                     elif event_type == 'message':
                         try:
-                            msg = json.loads(data)
-                            messages.append(msg)
-                            # Only signal done when we have the tool result (id=1)
-                            if msg.get('id') == 1:
-                                result_event.set()
-                        except Exception:
-                            pass
-                elif line == '':
-                    event_type = None
-                if result_event.is_set():
-                    break
+                            msg = json.loads(data); messages.append(msg)
+                            if msg.get('id') == 1: result_event.set()
+                        except Exception: pass
+                elif line == '': event_type = None
+                if result_event.is_set(): break
         except Exception as e:
-            sse_error.append(str(e))
-            ready_evt.set()
-            result_event.set()
+            sse_error.append(str(e)); ready_evt.set(); result_event.set()
 
     ready_evt = threading.Event()
-
-    # Open SSE stream in background thread
     base = nds_url.rsplit('/sse', 1)[0]
     req_sse = urllib.request.Request(nds_url, headers={'Accept': 'text/event-stream'})
-    try:
-        sse_resp = urllib.request.urlopen(req_sse, timeout=timeout)
-    except Exception as e:
-        raise RuntimeError(f'SSE connect failed: {e}')
+    try:    sse_resp = urllib.request.urlopen(req_sse, timeout=timeout)
+    except Exception as e: raise RuntimeError(f'SSE connect failed: {e}')
 
     t = threading.Thread(target=sse_reader, args=(sse_resp,), daemon=True)
     t.start()
-
     try:
-        # Wait for session endpoint
-        if not ready_evt.wait(timeout=5):
-            raise RuntimeError('Timed out waiting for SSE endpoint')
-        if sse_error:
-            raise RuntimeError(sse_error[0])
+        if not ready_evt.wait(timeout=5): raise RuntimeError('Timed out waiting for SSE endpoint')
+        if sse_error: raise RuntimeError(sse_error[0])
 
         def post(payload):
             url = base + endpoint_path
             data = json.dumps(payload).encode()
             req = urllib.request.Request(url, data=data,
                 headers={'Content-Type': 'application/json'}, method='POST')
-            with urllib.request.urlopen(req, timeout=5) as r:
-                return r.status
+            with urllib.request.urlopen(req, timeout=5) as r: return r.status
 
-        # MCP handshake
         post({'jsonrpc':'2.0','id':0,'method':'initialize',
-              'params':{'protocolVersion':'2024-11-05',
-                        'capabilities':{},'clientInfo':{'name':'helios-model','version':'1.0'}}})
+              'params':{'protocolVersion':'2024-11-05','capabilities':{},
+                        'clientInfo':{'name':'helios-model','version':'1.0'}}})
         time.sleep(0.1)
         post({'jsonrpc':'2.0','method':'notifications/initialized'})
         time.sleep(0.1)
-
-        # Tool call
         post({'jsonrpc':'2.0','id':1,'method':'tools/call',
               'params':{'name': tool_name, 'arguments': arguments}})
 
-        # Wait for result on SSE stream
-        if not result_event.wait(timeout=10):
-            raise RuntimeError('Timed out waiting for tool result')
-
-        # Find the response with id=1
+        if not result_event.wait(timeout=10): raise RuntimeError('Timed out waiting for tool result')
         for msg in messages:
             if msg.get('id') == 1:
                 content = msg.get('result', {}).get('content', [])
@@ -326,15 +360,11 @@ def mcp_tool_call(nds_url, tool_name, arguments, timeout=15):
                     raise RuntimeError(msg['error'].get('message', str(msg['error'])))
         raise RuntimeError('No result message received')
     finally:
-        # Always close the SSE stream — unblocks the reader thread and releases the FD
         try: sse_resp.close()
         except Exception: pass
-        # Give the reader a moment to exit cleanly
         t.join(timeout=1.0)
 
-
-
-
+# ── HTTP Handler ──────────────────────────────────────────────────────────────
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -350,120 +380,120 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def serve_json_file(self, path):
+        try:
+            with open(path, 'rb') as f: body = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', len(body))
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception:
+            self.send_response(404); self.end_headers()
+
     def do_GET(self):
-        if self.path == '/helios_geometry.json':
-            # Serve helios_geometry.json from root folder (no-cache: rebuilt by apply-geo)
-            try:
-                with open(GEO_JSON, 'rb') as f:
-                    body = f.read()
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Content-Length', len(body))
-                self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
-                self.end_headers()
-                self.wfile.write(body)
-            except Exception:
-                self.send_response(404); self.end_headers()
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(self.path)
+        path   = parsed.path
+        params = parse_qs(parsed.query)
 
-        elif self.path == '/api/mcp_config':
-            self.send_json({'ok': True, **read_mcp_config()})
+        # ── Static config (read-only) ──────────────────────────────────────────
+        if path == '/helios_config.json':
+            self.serve_json_file(CONFIG_JSON)
 
-        elif self.path == '/api/nds/status':
-            cfg = read_mcp_config()
-            url = cfg.get('nds_url', DEFAULT_NDS_URL)
-            reachable = probe_nds(url)
-            self.send_json({'ok': True, 'reachable': reachable, 'nds_url': url})
+        # ── Runtime state ─────────────────────────────────────────────────────
+        elif path == '/api/state':
+            self.send_json({'ok': True, 'state': read_state()})
 
-        elif self.path.startswith('/api/nds/query'):
-            from urllib.parse import urlparse, parse_qs
-            params = parse_qs(urlparse(self.path).query)
-            tool   = params.get('tool', [None])[0]
-            args_s = params.get('args', ['{}'])[0]
-            if not tool:
-                self.send_json({'ok': False, 'error': 'Missing tool param'}, 400)
-            else:
-                try:
-                    cfg = read_mcp_config()
-                    url = cfg.get('nds_url', DEFAULT_NDS_URL)
-                    arguments = json.loads(args_s)
-                    result = mcp_tool_call(url, tool, arguments)
-                    self.send_json({'ok': True, 'result': result})
-                except Exception as e:
-                    self.send_json({'ok': False, 'error': str(e)}, 500)
+        # ── Geometry JSON (derived from state, for 3D viewer + backward compat) ─
+        elif path == '/helios_geometry.json':
+            state = read_state()
+            self.send_json(_state_to_geo_json(state))
 
-        elif self.path == '/api/data':
-            # Placeholder for live EPICS data
-            # Format: {"0": value, ...} keyed by detector ID
-            self.send_json({})
+        # ── Reaction config (derived from state, for kinematics compat) ────────
+        elif path == '/api/reaction_config':
+            state = read_state()
+            rxn   = state.get('reaction', {})
+            comp  = state.get('computed', {})
+            result = {
+                **rxn,
+                **{k: comp[k] for k in comp if k != 'detectors'},
+                'config_source': state.get('config_source', 'manual'),
+                'ss_type':       state.get('ss_type', 'HELIOS'),
+                # legacy keys for kinematics.html compatibility
+                'recoil_light_A': rxn.get('light_A', 1),
+                'recoil_light_Z': rxn.get('light_Z', 1),
+                'recoil_light_label': comp.get('recoil_light_label', ''),
+                'recoil_heavy_label': comp.get('recoil_heavy_label', ''),
+            }
+            self.send_json({'ok': True, 'reaction': result})
 
-        elif self.path == '/api/config':
-            # Read digios files, update helios_geometry.json + helios_reaction.json, return data
+        # ── Load from digios (explicit user action) ────────────────────────────
+        elif path == '/api/config':
+            from build_geometry import parse_detgeo, parse_reaction_config
             result = {'ok': True, 'errors': []}
+            try:
+                if not os.path.exists(DETECTOR_GEO):
+                    raise FileNotFoundError(f'detectorGeo.txt not found at {DETECTOR_GEO}')
+                if not os.path.exists(REACTION_CFG):
+                    raise FileNotFoundError(f'reactionConfig.txt not found at {REACTION_CFG}')
 
-            # 1. Read + save helios_geometry.json
-            if os.path.exists(DETECTOR_GEO):
-                try:
-                    result['detGeo'] = parse_detgeo(DETECTOR_GEO)
-                    # Save geometry JSON
-                    r = subprocess.run(
-                        [sys.executable, BUILD_GEO_PY, DETECTOR_GEO, GEO_JSON],
-                        capture_output=True, text=True, timeout=10
-                    )
-                    if r.returncode == 0:
-                        # Stamp config_source=digios into geometry JSON
-                        try:
-                            with open(GEO_JSON) as _gf: _gd = json.load(_gf)
-                            _gd['config_source'] = 'digios'
-                            with open(GEO_JSON, 'w') as _gf: json.dump(_gd, _gf, indent=2)
-                        except Exception: pass
-                    else:
-                        result['errors'].append(f'rebuild_geo: {r.stderr.strip()}')
-                except Exception as e:
-                    result['errors'].append(f'detectorGeo: {e}')
-            else:
-                result['errors'].append(f'detectorGeo.txt not found at {DETECTOR_GEO}')
+                dg = parse_detgeo(DETECTOR_GEO)
+                rc = parse_reaction_config(REACTION_CFG)
+                cfg = _get_config()
+                m = int(dg.get('mDet', 4))
+                ss = next((k for k,v in cfg.get('spectrometers',{}).items()
+                           if v.get('mDet') == m), 'HELIOS')
 
-            # 2. Read reactionConfig + run build_reaction.py -> save helios_reaction.json
-            if os.path.exists(REACTION_CFG):
-                try:
-                    rc = parse_reaction_config(REACTION_CFG)
-                    result['reactionConfig'] = rc
-                    # Save to helios_reaction.json
-                    rxData = {
-                        'beam_A': rc.get('beam_A'), 'beam_Z': rc.get('beam_Z'),
-                        'target_A': rc.get('target_A'), 'target_Z': rc.get('target_Z'),
-                        'recoil_light_A': rc.get('recoil_light_A'), 'recoil_light_Z': rc.get('recoil_light_Z'),
-                        'beam_energy_MeVu': rc.get('beam_energy_MeVu'),
-                        'config_source': 'digios',
-                    }
-                    with open(HELIOS_REACTION_JSON, 'w') as f:
-                        json.dump(rxData, f, indent=2)
-                    # Run build_reaction.py
-                    r2 = subprocess.run(
-                        [sys.executable, BUILD_REACTION_PY, HELIOS_REACTION_JSON],
-                        capture_output=True, text=True, timeout=15
-                    )
-                    if r2.returncode == 0:
-                        with open(HELIOS_REACTION_JSON) as f:
-                            result['reaction'] = json.load(f)
-                    else:
-                        result['errors'].append(f'build_reaction: {r2.stderr.strip()}')
-                except Exception as e:
-                    result['errors'].append(f'reactionConfig: {e}')
-            else:
-                result['errors'].append(f'reactionConfig.txt not found at {REACTION_CFG}')
-
+                state = {
+                    'config_source': 'digios',
+                    'ss_type': ss,
+                    'geometry': {
+                        'firstPos':    float(dg.get('firstPos',  -100.0)),
+                        'recoilPos':   float(dg.get('recoilPos',  350.0)),
+                        'Bfield':      float(dg.get('Bfield',     -2.85)),
+                        'recoilInner': float(dg.get('recoilInner', 10.0)),
+                        'recoilOuter': float(dg.get('recoilOuter', 40.2)),
+                    },
+                    'reaction': {
+                        'beam_A':           int(rc.get('beam_A',   32)),
+                        'beam_Z':           int(rc.get('beam_Z',   14)),
+                        'target_A':         int(rc.get('target_A',  2)),
+                        'target_Z':         int(rc.get('target_Z',  1)),
+                        'light_A':          int(rc.get('recoil_light_A', 1)),
+                        'light_Z':          int(rc.get('recoil_light_Z', 1)),
+                        'beam_energy_MeVu': float(rc.get('beam_energy_MeVu', 8.8)),
+                    },
+                    'computed': {},
+                }
+                recompute_state(state)
+                write_state(state)
+                result['state']        = state
+                result['detGeo']       = dg
+                result['reactionConfig'] = rc
+            except Exception as e:
+                result['ok'] = False
+                result['error'] = str(e)
             self.send_json(result)
 
-        elif self.path.startswith('/api/mass'):
-            # Mass lookup from AME2020: /api/mass?AZ=32Si  or  /api/mass?A=32&Z=14
-            from urllib.parse import urlparse, parse_qs
-            params = parse_qs(urlparse(self.path).query)
+        # ── Capabilities ──────────────────────────────────────────────────────
+        elif path == '/api/capabilities':
+            self.send_json({
+                'ok': True,
+                'digios':      os.path.exists(DETECTOR_GEO),
+                'ptolemy':     os.path.exists(PTOLEMY_BIN),
+                'mass_table':  os.path.exists(_MASS_PATH),
+            })
+
+        # ── Mass lookup ───────────────────────────────────────────────────────
+        elif path.startswith('/api/mass'):
             masses = _get_masses()
             if masses is None:
                 self.send_json({'ok': False, 'error': 'mass20.txt not found'}, 404)
             else:
                 try:
+                    from build_reaction import get_mass
                     A = Z = None
                     if 'AZ' in params:
                         import re
@@ -471,23 +501,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         m = re.match(r'^(\d+)([A-Za-z]+)$', az)
                         if m:
                             sym = m.group(2)
-                            # Case-sensitive: canonicalize to Title-case so 'N' != 'n'
                             sym_canon = sym if len(sym)==1 else sym[0].upper()+sym[1:].lower()
-                            A,Z = int(m.group(1)), next((i for i,s in enumerate(ELEMENT_SYMBOLS) if s==sym_canon), None)
+                            Z = next((i for i,s in enumerate(ELEMENT_SYMBOLS) if s==sym_canon), None)
+                            A = int(m.group(1))
                     elif 'A' in params and 'Z' in params:
-                        A,Z = int(params['A'][0]), int(params['Z'][0])
+                        A, Z = int(params['A'][0]), int(params['Z'][0])
                     if A is None or Z is None:
                         self.send_json({'ok': False, 'error': 'Bad A/Z'})
                     else:
-                        N = A - Z
-                        mass = masses.get((Z,A))
                         mn = masses.get((0,1), 939.565)
                         mp = masses.get((1,1), 938.272)
-                        m_alpha = masses.get((2,4), 3727.379)  # 4He nuclear mass
-                        Sn = (masses.get((Z,A-1),0) + mn - mass)     if mass and A>1 else None
-                        Sp = (masses.get((Z-1,A-1),0) + mp - mass)   if mass and Z>1 else None
-                        Sa = (masses.get((Z-2,A-4),0) + m_alpha - mass) if mass and A>4 and Z>2 else None
-                        self.send_json({'ok': True, 'A':A,'Z':Z,'N':N,
+                        m_alpha = masses.get((2,4), 3727.379)
+                        mass = masses.get((Z,A))
+                        Sn = (masses.get((Z,A-1),0) + mn - mass)       if mass and A>1 else None
+                        Sp = (masses.get((Z-1,A-1),0) + mp - mass)     if mass and Z>1 else None
+                        Sa = (masses.get((Z-2,A-4),0)+m_alpha - mass)  if mass and A>4 and Z>2 else None
+                        self.send_json({'ok':True,'A':A,'Z':Z,'N':A-Z,
                             'mass': round(mass,4) if mass else None,
                             'name': f'{A}{element_symbol(Z)}',
                             'Sn': round(Sn,4) if Sn else None,
@@ -496,210 +525,154 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 except Exception as e:
                     self.send_json({'ok': False, 'error': str(e)}, 500)
 
-        elif self.path == '/api/reaction_config':
-            # GET: read helios_reaction.json
-            if os.path.exists(HELIOS_REACTION_JSON):
+        # ── NDS/MCP ───────────────────────────────────────────────────────────
+        elif path == '/api/mcp_config':
+            self.send_json({'ok': True, **read_mcp_config()})
+
+        elif path == '/api/nds/status':
+            cfg = read_mcp_config()
+            url = cfg.get('nds_url', DEFAULT_NDS_URL)
+            self.send_json({'ok': True, 'reachable': probe_nds(url), 'nds_url': url})
+
+        elif path.startswith('/api/nds/query'):
+            tool   = params.get('tool', [None])[0]
+            args_s = params.get('args', ['{}'])[0]
+            if not tool:
+                self.send_json({'ok': False, 'error': 'Missing tool param'}, 400)
+            else:
                 try:
-                    with open(HELIOS_REACTION_JSON) as f:
-                        data = json.load(f)
-                    self.send_json({'ok': True, 'reaction': data})
+                    cfg = read_mcp_config()
+                    url = cfg.get('nds_url', DEFAULT_NDS_URL)
+                    result = mcp_tool_call(url, tool, json.loads(args_s))
+                    self.send_json({'ok': True, 'result': result})
                 except Exception as e:
                     self.send_json({'ok': False, 'error': str(e)}, 500)
-            else:
-                self.send_json({'ok': False, 'error': 'helios_reaction.json not found'}, 404)
 
-        elif self.path == '/api/build_reaction':
-            # GET: run build_reaction.py using existing helios_reaction.json
-            try:
-                python = sys.executable
-                r = subprocess.run(
-                    [python, BUILD_REACTION_PY, HELIOS_REACTION_JSON],
-                    capture_output=True, text=True, timeout=15
-                )
-                if r.returncode == 0:
-                    with open(HELIOS_REACTION_JSON) as f:
-                        data = json.load(f)
-                    self.send_json({'ok': True, 'output': r.stdout.strip(), 'reaction': data})
-                else:
-                    self.send_json({'ok': False, 'error': r.stderr.strip() or r.stdout.strip()}, 500)
-            except Exception as e:
-                self.send_json({'ok': False, 'error': str(e)}, 500)
-
-        elif self.path.startswith('/api/rebuild_geo'):
-            # Regenerate helios_geometry.json from detectorGeo.txt
-            # Optional query params: firstPos, recoilPos passed as CLI args to build_geometry.py
-            from urllib.parse import urlparse, parse_qs
-            params = parse_qs(urlparse(self.path).query)
-            try:
-                cmd = [sys.executable, BUILD_GEO_PY, DETECTOR_GEO, GEO_JSON]
-                if 'firstPos' in params:
-                    cmd += ['--firstPos', params['firstPos'][0]]
-                if 'recoilPos' in params:
-                    cmd += ['--recoilPos', params['recoilPos'][0]]
-                r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-                if r.returncode == 0:
-                    # Stamp config_source into the written geometry JSON
-                    source = params.get('config_source', ['manual'])[0]
-                    try:
-                        with open(GEO_JSON) as _gf: _gd = json.load(_gf)
-                        _gd['config_source'] = source
-                        if 'Bfield' in params:
-                            _gd['Bfield'] = float(params['Bfield'][0])
-                        with open(GEO_JSON, 'w') as _gf: json.dump(_gd, _gf, indent=2)
-                    except Exception: pass
-                    self.send_json({'ok': True, 'output': r.stdout.strip()})
-                else:
-                    self.send_json({'ok': False, 'error': r.stderr.strip()}, 500)
-            except Exception as e:
-                self.send_json({'ok': False, 'error': str(e)}, 500)
+        elif path == '/api/data':
+            self.send_json({})
 
         else:
             super().do_GET()
 
     def do_POST(self):
         length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(length)
-        if self.path == '/api/mcp_config':
+        body   = self.rfile.read(length)
+        from urllib.parse import urlparse
+        path = urlparse(self.path).path
+
+        # ── Save state (main Save Config endpoint) ────────────────────────────
+        if path == '/api/state':
             try:
-                data = json.loads(body)
-                cfg  = read_mcp_config()
+                data  = json.loads(body)
+                state = read_state()
+                # Merge incoming fields
+                if 'ss_type'       in data: state['ss_type']       = data['ss_type']
+                if 'config_source' in data: state['config_source'] = data['config_source']
+                if 'geometry'      in data: state['geometry'].update(data['geometry'])
+                if 'reaction'      in data: state['reaction'].update(data['reaction'])
+                recompute_state(state)
+                write_state(state)
+                self.send_json({'ok': True, 'state': state})
+            except Exception as e:
+                self.send_json({'ok': False, 'error': str(e)}, 500)
+
+        # ── Build reaction (legacy compat — used by Ptolemy panel) ────────────
+        elif path == '/api/build_reaction':
+            try:
+                data   = json.loads(body)
+                state  = read_state()
+                # Accept both old (recoil_light_A) and new (light_A) keys
+                rxn = {
+                    'beam_A':           int(data.get('beam_A',   state['reaction'].get('beam_A',   32))),
+                    'beam_Z':           int(data.get('beam_Z',   state['reaction'].get('beam_Z',   14))),
+                    'target_A':         int(data.get('target_A', state['reaction'].get('target_A',  2))),
+                    'target_Z':         int(data.get('target_Z', state['reaction'].get('target_Z',  1))),
+                    'light_A':          int(data.get('light_A',  data.get('recoil_light_A',
+                                            state['reaction'].get('light_A', 1)))),
+                    'light_Z':          int(data.get('light_Z',  data.get('recoil_light_Z',
+                                            state['reaction'].get('light_Z', 1)))),
+                    'beam_energy_MeVu': float(data.get('beam_energy_MeVu',
+                                            state['reaction'].get('beam_energy_MeVu', 8.8))),
+                }
+                if 'config_source' in data: state['config_source'] = data['config_source']
+                if 'ss_type'       in data: state['ss_type']       = data['ss_type']
+                state['reaction'] = rxn
+                recompute_state(state)
+                write_state(state)
+                comp = state['computed']
+                # Return in legacy format expected by kinematics.html
+                result = {**rxn, **{k:v for k,v in comp.items() if k!='detectors'},
+                          'config_source': state['config_source'],
+                          'recoil_light_A': rxn['light_A'], 'recoil_light_Z': rxn['light_Z'],
+                          'recoil_light_label': comp.get('recoil_light_label',''),
+                          'recoil_heavy_label': comp.get('recoil_heavy_label',''),}
+                self.send_json({'ok': True, 'reaction': result})
+            except Exception as e:
+                self.send_json({'ok': False, 'error': str(e)}, 500)
+
+        # ── MCP config save ───────────────────────────────────────────────────
+        elif path == '/api/mcp_config':
+            try:
+                data = json.loads(body); cfg = read_mcp_config()
                 cfg.update({k: v for k, v in data.items() if k in ('nds_url',)})
                 save_mcp_config(cfg)
                 self.send_json({'ok': True})
             except Exception as e:
                 self.send_json({'ok': False, 'error': str(e)}, 500)
-        elif self.path == '/api/reaction_config':
-            # Save helios_reaction.json only (no build)
-            try:
-                data = json.loads(body)
-                with open(HELIOS_REACTION_JSON, 'w') as f:
-                    json.dump(data, f, indent=2)
-                self.send_json({'ok': True})
-            except Exception as e:
-                self.send_json({'ok': False, 'error': str(e)}, 500)
-        elif self.path == '/api/build_reaction':
-            # POST: save body to helios_reaction.json + run build_reaction.py in one step
-            try:
-                data = json.loads(body)
-                # Preserve or set config_source; caller may pass it explicitly
-                if 'config_source' not in data:
-                    data['config_source'] = 'manual'
-                with open(HELIOS_REACTION_JSON, 'w') as f:
-                    json.dump(data, f, indent=2)
-                python = sys.executable
-                r = subprocess.run(
-                    [python, BUILD_REACTION_PY, HELIOS_REACTION_JSON],
-                    capture_output=True, text=True, timeout=15
-                )
-                if r.returncode == 0:
-                    with open(HELIOS_REACTION_JSON) as f:
-                        result = json.load(f)
-                    self.send_json({'ok': True, 'output': r.stdout.strip(), 'reaction': result})
-                else:
-                    self.send_json({'ok': False, 'error': r.stderr.strip() or r.stdout.strip()}, 500)
-            except Exception as e:
-                self.send_json({'ok': False, 'error': str(e)}, 500)
 
-        elif self.path == '/api/ptolemy':
-            # POST: run Ptolemy DWBA for a set of Ex states
-            # Body: { reaction: {...helios_reaction.json...}, states: [{ex, l, j, nodes}, ...],
-            #         angle_min, angle_max, angle_step }
-            import tempfile, shutil, re
+        # ── Ptolemy DWBA ──────────────────────────────────────────────────────
+        elif path == '/api/ptolemy':
+            import tempfile, shutil, re, glob, math as _math, importlib.util as _ilu
             try:
-                data      = json.loads(body)
-                rx        = data.get('reaction', {})
-                states    = data.get('states', [])
-                ang_min   = float(data.get('angle_min',   0.0))
-                ang_max   = float(data.get('angle_max', 180.0))
-                ang_step  = float(data.get('angle_step',   1.0))
-                jbiga     = data.get('jbiga', '0+')  # beam ground state J^pi
+                data     = json.loads(body)
+                state    = read_state()
+                rx       = data.get('reaction', {**state['reaction'], **state['computed']})
+                states   = data.get('states', [])
+                ang_min  = float(data.get('angle_min',   0.0))
+                ang_max  = float(data.get('angle_max', 180.0))
+                ang_step = float(data.get('angle_step',   1.0))
+                jbiga    = data.get('jbiga', '0+')
 
                 if not states:
-                    self.send_json({'ok': False, 'error': 'No states provided'}, 400)
-                    return
+                    self.send_json({'ok': False, 'error': 'No states provided'}, 400); return
+                if not os.path.exists(PTOLEMY_BIN):
+                    self.send_json({'ok': False, 'error': 'Ptolemy binary not found'}, 503); return
 
-                # Build reaction string from helios_reaction.json fields
-                # e.g. "13B(d,3He)12Be"
-                rx_str = rx.get('reaction_str', '')
-                beam_A_val = int(rx.get('beam_A', 1))
-                elab   = float(rx.get('beam_energy_MeVu', 14.0)) * beam_A_val  # total MeV
+                beam_A = int(rx.get('beam_A', state['reaction']['beam_A']))
+                tgt_A  = int(rx.get('target_A', state['reaction']['target_A']))
+                tgt_Z  = int(rx.get('target_Z', state['reaction']['target_Z']))
+                lt_A   = int(rx.get('light_A', rx.get('recoil_light_A', state['reaction']['light_A'])))
+                lt_Z   = int(rx.get('light_Z', rx.get('recoil_light_Z', state['reaction']['light_Z'])))
+                beam_Z = int(rx.get('beam_Z', state['reaction']['beam_Z']))
+                hvy_A  = beam_A + tgt_A - lt_A
+                hvy_Z  = beam_Z + tgt_Z - lt_Z
+                sym    = element_symbol
 
-                # A+Z → element symbol from shared module-level ELEMENT_SYMBOLS
-                sym = sym_for_Z
-
-                # Potential reference strings — built once per request, shared across all states
                 _POT_REFS = {
-                    'A':'An and Cai (2006)', 'H':'Han, Shi, Shen (2006)',
-                    'D':'Daehnick (1980) REL', 'C':'Daehnick (1980) NON-REL',
-                    'L':'Lohr and Haeberli (1974)', 'Q':'Perey and Perey (1963)',
-                    'Z':'Zhang, Pang, Lou (2016)',
-                    'K':'Koning and Delaroche (2009)', 'V':'Varner CH89 (1991)',
-                    'M':'Menet (1971)', 'G':'Becchetti and Greenlees (1969)',
-                    'P':'Perey (1963)',
-                    'x':'Xu, Guo, Han, Shen (2011)', 'X':'Xu, Guo, Han, Shen (2011)',
-                    'l':'Liang, Li, Cai (2009)', 'p':'Pang (2009)',
-                    'c':'Li, Liang, Cai (2007)', 't':'Trost (1987)',
-                    'h':'Hyakutake (1980)', 'b':'Becchetti and Greenlees (1971)',
-                    's':'Su and Han (2015)', 'S':'Su and Han (2015)',
-                    'a':'Avrigeanu (2009)', 'f':'Bassani and Picard (1969)',
-                    'n':'zero (neutron)',
+                    'A':'An and Cai (2006)','H':'Han, Shi, Shen (2006)',
+                    'D':'Daehnick (1980) REL','C':'Daehnick (1980) NON-REL',
+                    'K':'Koning and Delaroche (2009)','V':'Varner CH89 (1991)',
+                    'M':'Menet (1971)','G':'Becchetti and Greenlees (1969)',
+                    'x':'Xu, Guo, Han, Shen (2011)','X':'Xu, Guo, Han, Shen (2011)',
+                    'l':'Liang, Li, Cai (2009)','s':'Su and Han (2015)',
+                    'S':'Su and Han (2015)','n':'zero (neutron)',
                 }
+                reaction_label = f'{beam_A}{sym(beam_Z)}({tgt_A}{sym(tgt_Z)},{lt_A}{sym(lt_Z)}){hvy_A}{sym(hvy_Z)}'
+                qvalue = rx.get('Q', state['computed'].get('Q'))
+                if qvalue is not None: qvalue = float(qvalue)
 
-                beam_A  = beam_A_val;  beam_Z  = int(rx.get('beam_Z',  1))
-                tgt_A   = int(rx.get('target_A',2));  tgt_Z   = int(rx.get('target_Z',1))
-                lt_A    = int(rx.get('recoil_light_A',1)); lt_Z = int(rx.get('recoil_light_Z',1))
-                hvy_A   = beam_A + tgt_A - lt_A
-                hvy_Z   = beam_Z + tgt_Z - lt_Z
+                _gf_spec = _ilu.spec_from_file_location('gen_infile', GEN_INFILE_PY)
+                _gf = _ilu.module_from_spec(_gf_spec); _gf_spec.loader.exec_module(_gf)
 
-                # projectile = target nucleus in Ptolemy convention
-                # beam hits target → projectile=target particle, target=beam nucleus
-                # Cleopatra convention: BeamNuc(target,light)HeavyNuc
-                beam_lbl = f'{beam_A}{sym(beam_Z)}'
-                tgt_lbl  = f'{tgt_A}{sym(tgt_Z)}'
-                lt_lbl   = f'{lt_A}{sym(lt_Z)}'
-                hvy_lbl  = f'{hvy_A}{sym(hvy_Z)}'
-
-                reaction_label = f'{beam_lbl}({tgt_lbl},{lt_lbl}){hvy_lbl}'
-
-                PTOLEMY    = os.path.expanduser('~/digios/analysis/Cleopatra/ptolemy')
-                GEN_INFILE = os.path.expanduser('~/helios_model/gen_infile.py')
-                PYTHON     = sys.executable
-
-                # Load gen_infile module for direct use
-                import importlib.util as _ilu
-                _gf_spec = _ilu.spec_from_file_location('gen_infile', GEN_INFILE)
-                _gf = _ilu.module_from_spec(_gf_spec)
-                _gf_spec.loader.exec_module(_gf)
-
-                # Compute Q-value from NDS masses if possible
-                # Approximate: use mass excesses from AME (skip for now, pass None -> 0)
-                qvalue = rx.get('Q', None)
-                if qvalue is not None:
-                    qvalue = float(qvalue)
-
-                tmpdir = tempfile.mkdtemp(prefix='ptolemy_')
-                results = []
-                errors  = []
-
+                tmpdir  = tempfile.mkdtemp(prefix='ptolemy_')
+                results = []; errors = []
                 try:
                     for st in states:
-                        ex    = float(st.get('ex',    0.0))
-                        l     = int(st.get('l',       0))
-                        j_str = str(st.get('j',       '0.5'))
-                        n     = int(st.get('nodes',   0))
+                        ex  = float(st.get('ex', 0.0)); l = int(st.get('l', 0))
+                        j_str = str(st.get('j', '0.5')); n = int(st.get('nodes', 0))
                         recoil_jpi = st.get('recoil_jpi', '0+')
+                        j_val = float(j_str.split('/')[0])/float(j_str.split('/')[1]) if '/' in j_str else float(j_str)
 
-                        if '/' in j_str:
-                            num, den = j_str.split('/')
-                            j_val = float(num) / float(den)
-                        else:
-                            j_val = float(j_str)
-
-                        # Determine potential codes
-                        pot_in_key  = st.get('pot_in',  'auto')
-                        pot_out_key = st.get('pot_out', 'auto')
-
-                        # Auto: pick based on particle type
                         def auto_pot(A, Z):
                             if A==1 and Z==1: return 'K'
                             if A==2 and Z==1: return 'A'
@@ -708,149 +681,61 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             if A==4 and Z==2: return 's'
                             return 'n'
 
-                        if pot_in_key  == 'auto': pot_in_key  = auto_pot(tgt_A, tgt_Z)
-                        if pot_out_key == 'auto': pot_out_key = auto_pot(lt_A,  lt_Z)
-
-                        pot_in_ref  = _POT_REFS.get(pot_in_key,  pot_in_key)
-                        pot_out_ref = _POT_REFS.get(pot_out_key, pot_out_key)
+                        pot_in  = st.get('pot_in',  'auto'); pot_out = st.get('pot_out', 'auto')
+                        if pot_in  == 'auto': pot_in  = auto_pot(tgt_A, tgt_Z)
+                        if pot_out == 'auto': pot_out = auto_pot(lt_A,  lt_Z)
 
                         try:
                             in_content = _gf.gen_infile(
                                 beam_A=beam_A, beam_Z=beam_Z,
                                 target_A=tgt_A, target_Z=tgt_Z,
-                                light_A=lt_A,  light_Z=lt_Z,
-                                beam_energy_MeVu=float(rx.get('beam_energy_MeVu', elab/beam_A_val)),
+                                light_A=lt_A, light_Z=lt_Z,
+                                beam_energy_MeVu=float(rx.get('beam_energy_MeVu', state['reaction']['beam_energy_MeVu'])),
                                 ex=ex, nodes=n, l=l, j=j_val,
-                                recoil_jpi=recoil_jpi,
-                                jbiga=jbiga,
-                                pot_in_code=pot_in_key,
-                                pot_out_code=pot_out_key,
-                                pot_in_ref=pot_in_ref,
-                                pot_out_ref=pot_out_ref,
+                                recoil_jpi=recoil_jpi, jbiga=jbiga,
+                                pot_in_code=pot_in, pot_out_code=pot_out,
+                                pot_in_ref=_POT_REFS.get(pot_in, pot_in),
+                                pot_out_ref=_POT_REFS.get(pot_out, pot_out),
                                 ang_min=ang_min, ang_max=ang_max, ang_step=ang_step,
                                 qvalue=qvalue,
                             )
                         except Exception as ge:
-                            errors.append({'msg': f'Ex={ex}: gen_infile failed: {ge}', 'in_file': ''})
-                            continue
+                            errors.append({'msg': f'Ex={ex}: gen_infile failed: {ge}', 'in_file': ''}); continue
 
                         in_file = os.path.join(tmpdir, f'state_ex{ex:.3f}_l{l}.in')
                         with open(in_file, 'w') as fh: fh.write(in_content)
+                        for f in glob.glob(os.path.join(tmpdir, 'fort.*')): os.remove(f)
 
+                        with open(in_file) as _si:
+                            pty_r = subprocess.run([PTOLEMY_BIN], stdin=_si,
+                                capture_output=True, text=True, timeout=60, cwd=tmpdir)
 
-                        # Run Ptolemy (Cleopatra binary)
-                        fort_pat = os.path.join(tmpdir, 'fort.*')
-                        import glob
-                        for f in glob.glob(fort_pat): os.remove(f)
-
-                        with open(in_file) as _stdin_fh:
-                          pty_r = subprocess.run(
-                            [PTOLEMY],
-                            stdin=_stdin_fh,
-                            capture_output=True, text=True,
-                            timeout=60, cwd=tmpdir
-                        )
-
-                        # Parse output: extract CM angle + dσ/dΩ (mb/sr) column
-                        angles = []; xsec = []
-                        in_xsec = False
+                        angles = []; xsec = []; in_xsec = False
                         for line in pty_r.stdout.splitlines():
-                            if 'COMPUTATION OF CROSS SECTIONS' in line:
-                                in_xsec = True; continue
+                            if 'COMPUTATION OF CROSS SECTIONS' in line: in_xsec = True; continue
                             if not in_xsec: continue
-                            # Data lines: leading spaces + float angle + xsec (may be NaN)
-                            m = re.match(r'^\s+(\d+\.\d+)\s+(NaN|[\d\.Ee+\-]+)\s+', line)
-                            if m:
-                                val = m.group(2)
-                                angles.append(float(m.group(1)))
-                                xsec.append(float('nan') if val == 'NaN' else float(val))
-                            # Stop at TOTAL line
-                            if line.strip().startswith('0TOTAL:'):
-                                break
+                            m2 = re.match(r'^\s+(\d+\.\d+)\s+(NaN|[\d\.Ee+\-]+)\s+', line)
+                            if m2:
+                                angles.append(float(m2.group(1)))
+                                xsec.append(float('nan') if m2.group(2)=='NaN' else float(m2.group(2)))
+                            if line.strip().startswith('0TOTAL:'): break
 
-                        # Filter out all-NaN results
-                        import math
-                        valid = [(a, x) for a, x in zip(angles, xsec) if not math.isnan(x)]
-                        if valid:
-                            angles, xsec = zip(*valid)
-                            angles, xsec = list(angles), list(xsec)
-                        else:
-                            angles, xsec = [], []
+                        valid = [(a,x) for a,x in zip(angles,xsec) if not _math.isnan(x)]
+                        if valid: angles, xsec = map(list, zip(*valid))
+                        else:     angles, xsec = [], []
 
                         if not angles:
-                            # Try to extract Ptolemy's reason from output
-                            reason = ''
-                            lines_out = pty_r.stdout.splitlines()
-                            for i, line in enumerate(lines_out):
-                                if 'INCOMPATABLE' in line:
-                                    reason = line.strip().lstrip('0*').strip()
-                                    break
-                                if 'ERROR IN INPUT' in line:
-                                    # Grab next non-empty line for JA/JB details
-                                    for j in range(i+1, min(i+4, len(lines_out))):
-                                        nxt = lines_out[j].strip()
-                                        if nxt:
-                                            reason = nxt
-                                            break
-                                    if not reason:
-                                        reason = 'ERROR IN INPUT'
-                                    break
-                            if not reason:
-                                recoil_jpi_str = st.get('recoil_jpi', '?')
-                                recoil_par = recoil_jpi_str[-1] if recoil_jpi_str and recoil_jpi_str[-1] in '+-' else '?'
-                                beam_par = jbiga[-1] if jbiga and jbiga[-1] in '+-' else '?'
-                                # expected recoil parity = beam_parity * (-1)^l
-                                if beam_par != '?' and recoil_par != '?':
-                                    beam_sign   = +1 if beam_par  == '+' else -1
-                                    recoil_sign = +1 if recoil_par == '+' else -1
-                                    expected    = beam_sign * ((-1)**l)
-                                    exp_char    = '+' if expected > 0 else '-'
-                                    def parse_j(s):
-                                        s = s.strip().rstrip('+-')
-                                        if '/' in s:
-                                            n2, d2 = s.split('/')
-                                            return float(n2)/float(d2)
-                                        try: return float(s)
-                                        except: return None
-                                    j_beam   = parse_j(jbiga)
-                                    j_recoil = parse_j(recoil_jpi_str)
-                                    j_trans  = parse_j(str(j_str))
-                                    if expected != recoil_sign:
-                                        reason = (f'parity mismatch: beam({beam_par}) x (-1)^l={l} = ({exp_char}), '
-                                                  f'but recoil Jpi={recoil_jpi_str} needs ({recoil_par}). '
-                                                  f'Try l={l+1}')
-                                    elif j_beam is not None and j_recoil is not None and j_trans is not None:
-                                        j_min = abs(j_beam - j_trans)
-                                        j_max = j_beam + j_trans
-                                        if not (j_min - 0.01 <= j_recoil <= j_max + 0.01):
-                                            reason = (f'coupling blocked: beam J={j_beam}, j={j_str} '
-                                                      f'gives range [{j_min:.1f},{j_max:.1f}], cannot reach J={j_recoil}')
-                                        else:
-                                            reason = ('Ptolemy NaN: parity and coupling OK but numerical result is NaN. '
-                                                      'Possible causes: high energy overflow, lmax too low, or wavefunction issue. '
-                                                      'Try increasing lmax or check Show .in file.')
-                                    else:
-                                        reason = 'no cross section -- check selection rules'
-                                else:
-                                    reason = 'no cross section -- check l/j/Jpi selection rules'
-                            errors.append({'msg': f'Ex={ex} (l={l} j={j_str} Jpi={st.get("recoil_jpi","?")}): {reason}', 'in_file': in_content})
-                            continue
+                            errors.append({'msg': f'Ex={ex} (l={l} j={j_str}): no cross section', 'in_file': in_content}); continue
 
-                        results.append({
-                            'ex': ex, 'l': l, 'j': j_str, 'nodes': n,
-                            'recoil_jpi': st.get('recoil_jpi', ''),
-                            'angles': angles, 'xsec': xsec,
-                            'in_file': in_content,
-                        })
-
-                        # Clean up .in files for next iteration
+                        results.append({'ex':ex,'l':l,'j':j_str,'nodes':n,
+                            'recoil_jpi':st.get('recoil_jpi',''),
+                            'angles':angles,'xsec':xsec,'in_file':in_content})
                         for f in os.listdir(tmpdir):
                             if f.endswith('.in'): os.remove(os.path.join(tmpdir, f))
                 finally:
                     shutil.rmtree(tmpdir, ignore_errors=True)
 
-                self.send_json({'ok': True, 'results': results, 'errors': errors,
-                                'reaction': reaction_label})
+                self.send_json({'ok':True,'results':results,'errors':errors,'reaction':reaction_label})
             except Exception as e:
                 self.send_json({'ok': False, 'error': str(e)}, 500)
 
@@ -860,15 +745,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # suppress access log spam
 
+
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-    """Handle each request in a separate thread (prevents DWBA blocking NDS queries)."""
     allow_reuse_address = True
     daemon_threads = True
 
+
 if __name__ == '__main__':
     os.chdir(DIR)
-    _get_masses()  # warm up mass cache at startup
-    ensure_default_files()  # create geometry/reaction JSON if missing
+    _get_masses()       # warm up mass cache
+    _get_config()       # warm up config cache
+    ensure_state()      # create/refresh helios_state.json
     with ThreadedTCPServer(('', PORT), Handler) as httpd:
         print(f'HELIOS 3D viewer: http://localhost:{PORT}')
         print(f'From network:     http://192.168.1.101:{PORT}')

@@ -461,6 +461,7 @@ dir2.position.set(-200,-100,-200); scene.add(dir2);
 // ═══════════════════════════════════════════════════════════════════
 let GEO = null;
 let detMeshes = [];
+let detGroup  = null;  // Group holding all detector pivots — removed on rebuild
 let boreGroup = null, recoilGroup = null, axisGroup = null, zAxisGroup = null;
 let movableGroup = null; // magnet bore slides along Z
 let beamArrowGroup = null;
@@ -468,7 +469,15 @@ let targetGroup = null;
 let tubeMeshes = []; // support tube panels for opacity control
 let tubeGroup = null; // support tube group (panels + wireframe)
 
-const ROW_COLORS = [0x58a6ff,0xff7b72,0x79c0ff,0xffa657]; // 4 sides
+// Row colors generated dynamically in getRowColor(row, mDet) — no hardcoded count
+function getRowColor(row, mDet) {
+  // Fixed palette for common cases; fallback to HSL for arbitrary mDet
+  const palette4 = [0x58a6ff, 0xff7b72, 0x79c0ff, 0xffa657];
+  const palette6 = [0x58a6ff, 0xff7b72, 0x79c0ff, 0xffa657, 0x56d364, 0xf778ba];
+  if (mDet === 4) return new THREE.Color(palette4[row % 4]);
+  if (mDet === 6) return new THREE.Color(palette6[row % 6]);
+  return new THREE.Color().setHSL((row / mDet) % 1.0, 0.75, 0.60);
+}
 const COL_COLORS = [0xff4444,0xff8c00,0xffd700,0x44ff88,0x44aaff,0xcc44ff]; // 6 z-positions
 // Cached colors for per-frame use — avoid allocating new THREE.Color every frame
 const _EMISSIVE_BLACK  = new THREE.Color(0, 0, 0);
@@ -476,7 +485,7 @@ const _EMISSIVE_HOVER  = new THREE.Color(0.3, 0.3, 0.0);
 
 function getDetColor(det) {
   const mode = document.getElementById('color-mode').value;
-  if (mode === 'row') return new THREE.Color(ROW_COLORS[det.row % 4]);
+  if (mode === 'row') return getRowColor(det.row, GEO ? GEO.mDet : 4);
   if (mode === 'col') return new THREE.Color(COL_COLORS[det.col % 6]);
   const hue = det.id / (GEO.nDet * GEO.mDet);
   return new THREE.Color().setHSL(hue, 0.8, 0.55);
@@ -628,31 +637,41 @@ function buildScene() {
   const g = GEO;
   detMeshes = [];
 
+  // Remove previous detector group if rebuilding
+  if (detGroup) { disposeGroup(detGroup); scene.remove(detGroup); }
+  detGroup = new THREE.Group();
+  scene.add(detGroup);
+
   // Fixed group: silicon array + recoil + target stay put
   movableGroup = new THREE.Group(); // bore/magnet slides
   scene.add(movableGroup);
 
   const detThickness = 2.5; // mm, rendered radial thickness
-  const tubeHalfVis = 10.5; // mm, must match tube construction below
-  const detRadialCenter = tubeHalfVis + detThickness / 2; // inner face flush on tube
+  const tubeWall = 1.5;        // mm, support tube wall thickness
+  const mDet = g.mDet || 4;
+  const tubeWidth = g.perpDist * Math.tan(Math.PI / mDet) * 2; // width of support tube panel face
+  const detRadialCenter = g.perpDist + detThickness / 2; // detector center: outer tube face (perpDist) + half thickness
 
   g.detectors.forEach(det => {
-    const geo = new THREE.BoxGeometry(det.width * 0.9, detThickness, det.length * 0.9);
+    // Build detector in canonical +X orientation:
+    //   box: dx=width (tangential), dy=thickness (radial out), dz=length (beam axis)
+    //   center at (detRadialCenter, 0, z_center)
+    // Then rotate a pivot group around Z by phi to place any row.
+    const geo = new THREE.BoxGeometry(detThickness, det.width, det.length);
     const mat = new THREE.MeshPhongMaterial({ color: getDetColor(det), transparent: false, opacity: 1.0, shininess: 60, depthWrite: true });
     const mesh = new THREE.Mesh(geo, mat);
-    // Radial direction unit vector for this detector
+    // Canonical +X position: face points in +Y (radially out), centered on beam axis offset
+    mesh.position.set(detRadialCenter, 0, det.z);
+    // Pivot group at beam axis origin — rotating it around Z moves both position and orientation
+    const pivot = new THREE.Group();
+    pivot.position.set(0, 0, 0);
+    pivot.add(mesh);
     const phi = det.phi_deg * Math.PI / 180;
-    const rx = Math.cos(phi), ry = Math.sin(phi);
-    mesh.position.set(rx * detRadialCenter, ry * detRadialCenter, det.z);
-    const baseRotY = -Math.atan2(det.y, det.x);
-    // row = side: 0=+X, 1=+Y, 2=-X, 3=-Y
-    const extraY = (det.row === 1 || det.row === 3) ? Math.PI / 2 : 0;
-    const extraZ = (det.row === 0 || det.row === 2) ? Math.PI / 2 : 0;
-    mesh.rotation.set(0, baseRotY + extraY, extraZ, 'YZX');
+    pivot.rotation.z = phi;
     mesh.renderOrder = 0;
     mesh.userData = { det };
-    scene.add(mesh);
-    detMeshes.push(mesh);
+    detGroup.add(pivot);
+    detMeshes.push(mesh);  // push mesh (not pivot) so color/hover updates work
   });
 
   // Bore — 1500 mm long, inside movableGroup (magnet slides along Z)
@@ -686,37 +705,36 @@ function buildScene() {
   }
   scene.add(recoilGroup);
 
-  // Array support tube — square hollow tube, 4 thin panels + wireframe
-  const tubeHalf = 10.5;              // 21 mm outer side → 10.5 mm half-side
-  const tubeWall = 1.5;               // mm wall thickness
-  const tubeLen  = g.zMax - g.zMin;  // 340 mm
-  const tubeCenterZ = (g.zMin + g.zMax) / 2; // -291 mm
+  // Array support tube — N-sided hollow tube (one flat panel per side), same pivot trick as detectors
+  // For mDet sides: panel half-width = perpDist * tan(π/mDet)
+  // mDet already declared above (used for detRadialCenter)
+  // tubeWall already declared above
+  const tubeLen  = g.zMax - g.zMin;
+  const tubeCenterZ = (g.zMin + g.zMax) / 2;
   tubeMeshes = [];
   tubeGroup = new THREE.Group();
-  [
-    { tx:  tubeHalf, ty: 0,          w: tubeWall,   h: tubeHalf*2 },
-    { tx: -tubeHalf, ty: 0,          w: tubeWall,   h: tubeHalf*2 },
-    { tx: 0,         ty:  tubeHalf,  w: tubeHalf*2, h: tubeWall   },
-    { tx: 0,         ty: -tubeHalf,  w: tubeHalf*2, h: tubeWall   },
-  ].forEach(f => {
+
+  for (let i = 0; i < mDet; i++) {
+    const phi = (2 * Math.PI / mDet) * i;
+    // Canonical +X panel: thin in X (wall), full panel width in Y, full length in Z
+    // positioned at (perpDist, 0, tubeCenterZ), then rotated by phi around Z
     const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(f.w, f.h, tubeLen),
+      new THREE.BoxGeometry(tubeWall, tubeWidth, tubeLen),
       new THREE.MeshPhongMaterial({ color: 0x888888, transparent: false, opacity: 1.0, depthWrite: true })
     );
-    mesh.position.set(f.tx, f.ty, tubeCenterZ);
-    tubeGroup.add(mesh);
+    mesh.position.set(g.perpDist - tubeWall/2, 0, tubeCenterZ); // center at perpDist-tubeWall/2 so outer face sits at perpDist
+    const pivot = new THREE.Group();
+    pivot.add(mesh);
+    pivot.rotation.z = phi;
+    tubeGroup.add(pivot);
     tubeMeshes.push(mesh);
-  });
-  const tubeWire = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(tubeHalf*2, tubeHalf*2, tubeLen)),
-    new THREE.LineBasicMaterial({ color: 0xbbbbbb, transparent: true, opacity: 0.5 })
-  );
-  tubeWire.position.z = tubeCenterZ;
-  tubeGroup.add(tubeWire);
+  }
+
+  // Wireframe outline removed — panels only
   scene.add(tubeGroup);
 
   // Store tube params on GEO for hit detection
-  GEO._tubeHalf = tubeHalf;
+  GEO._tubeWidth = tubeWidth;
   GEO._tubeZMin = g.zMin;
   GEO._tubeZMax = g.zMax;
 
@@ -805,13 +823,19 @@ function updateLegend() {
   if (!GEO) return;
   const mode = document.getElementById('color-mode').value;
   const items = document.getElementById('legend-items');
-  const sideNames = {0:'+X', 1:'+Y', 2:'-X', 3:'-Y'};
+  const mDet = GEO ? GEO.mDet : 4;
+  // Generate side labels: 4→[+X,+Y,-X,-Y], 6→[+X,+Y,-X,-Y,+X',-Y'], else φ-angle
+  function sideLabel(i) {
+    if (mDet === 4) return ['+X','+Y','-X','-Y'][i];
+    if (mDet === 6) return ['+X','+Y','-X','-Y','+X\'','-Y\''][i];
+    return (360/mDet*i).toFixed(0)+'°';
+  }
   document.getElementById('legend-title').textContent = mode === 'row' ? 'Color: By Row (side)' : mode === 'col' ? 'Color: By Col (z-pos)' : 'Color: By Det ID';
   items.innerHTML = '';
   if (mode === 'row') {
-    for (let i = 0; i < 4; i++) {
-      const c = '#'+new THREE.Color(ROW_COLORS[i]).getHexString();
-      items.innerHTML += `<div class="li"><div class="sw" style="background:${c}"></div><span>Row ${i}: ${sideNames[i]}</span></div>`;
+    for (let i = 0; i < mDet; i++) {
+      const c = '#'+getRowColor(i, mDet).getHexString();
+      items.innerHTML += `<div class="li"><div class="sw" style="background:${c}"></div><span>Row ${i}: ${sideLabel(i)}</span></div>`;
     }
   } else if (mode === 'col') {
     for (let j = 0; j < 6; j++) {
@@ -892,22 +916,15 @@ function pruneOldTracks() {
   });
 }
 
-// Check if a helix point hits the square support tube
+// Check if a helix point hits the N-sided support tube
+// Uses radial distance from beam axis: tube panels sit at r=perpDist, thickness=tubeWall
 function checkTubeHit(pt, geo) {
-  if (!geo._tubeHalf) return false;
+  if (!geo._tubeWidth) return false;
   if (pt.z < geo._tubeZMin || pt.z > geo._tubeZMax) return false;
-  const ax = Math.abs(pt.x), ay = Math.abs(pt.y);
-  const h = geo._tubeHalf;   // outer half-side = 10.5 mm
-  const w = 1.5;              // wall thickness mm
-  // Hit from outside: point just crossed the outer face
-  if (ax <= h && ay <= h) {
-    // Inside the square: hit inner face
-    return (ax > h - w || ay > h - w);
-  }
-  // Outside the square: hit outer face if within one wall thickness outside
-  if (ax <= h + w && ay <= h) return true; // crossed +X or -X face from outside
-  if (ay <= h + w && ax <= h) return true; // crossed +Y or -Y face from outside
-  return false;
+  const r = Math.sqrt(pt.x * pt.x + pt.y * pt.y);
+  const w = 1.5;  // wall thickness mm
+  // Hit if radial distance is within one wall thickness of perpDist
+  return Math.abs(r - geo.perpDist) < w;
 }
 
 // Check if a helix point hits a silicon detector
@@ -1194,7 +1211,11 @@ function checkHover() {
       hoveredMesh = mesh;
     }
     document.getElementById('tt-id').textContent = `Det ${det.id.toString().padStart(2,'0')}`;
-    const sideLabel = {0:'+X',1:'+Y',2:'-X',3:'-Y'}[det.row] || det.row;
+    const _mDet = GEO ? GEO.mDet : 4;
+    const _sideLabels4 = {0:'+X',1:'+Y',2:'-X',3:'-Y'};
+    const _sideLabels6 = {0:'+X',1:'+Y',2:'-X',3:'-Y',4:"+X'",5:"-Y'"};
+    const sideLabel = (_mDet===4 ? _sideLabels4 : _mDet===6 ? _sideLabels6 : {})[det.row]
+                   ?? (360/_mDet*det.row).toFixed(0)+'°';
     document.getElementById('tt-row').textContent = `${det.row} (${sideLabel})`;
     document.getElementById('tt-col').textContent = det.col;
     document.getElementById('tt-phi').textContent = det.phi_deg + '°';
@@ -1345,7 +1366,9 @@ function resolveSymbol(role) {
   if (!m) { if(info){ info.textContent='?'; info.style.color='#ff7b72'; } return; }
   const A = parseInt(m[1]);
   const sym = m[2];
-  const Z = ELEMENT_SYMBOLS.findIndex(s => s.toLowerCase()===sym.toLowerCase());
+  // Case-sensitive: Title-case canonicalization so 'N'=nitrogen(7) != 'n'=neutron(0)
+  const symCanon = sym.length === 1 ? sym : sym[0].toUpperCase() + sym.slice(1).toLowerCase();
+  const Z = ELEMENT_SYMBOLS.findIndex(s => s === symCanon);
   if (Z < 0) { if(info){ info.textContent='unknown'; info.style.color='#ff7b72'; } return; }
   document.getElementById(prefix+'-A').value = A;
   document.getElementById(prefix+'-Z').value = Z;
@@ -1407,27 +1430,29 @@ document.getElementById('rx-build-btn').addEventListener('click', async () => {
   const btn = document.getElementById('rx-build-btn');
   const status = document.getElementById('rx-status');
   btn.disabled = true; btn.textContent = '⟳ Computing...';
-  // Save current fields to helios_reaction.json
-  const rxData = {
-    beam_A:           parseInt(document.getElementById('rx-beam-A').value),
-    beam_Z:           parseInt(document.getElementById('rx-beam-Z').value),
-    target_A:         parseInt(document.getElementById('rx-tgt-A').value),
-    target_Z:         parseInt(document.getElementById('rx-tgt-Z').value),
-    recoil_light_A:   parseInt(document.getElementById('rx-rec-A').value),
-    recoil_light_Z:   parseInt(document.getElementById('rx-rec-Z').value),
-    beam_energy_MeVu: parseFloat(document.getElementById('rx-energy').value),
-    config_source:    'manual',
+  // POST reaction to /api/state — server recomputes kinematics
+  const payload = {
+    config_source: 'manual',
+    reaction: {
+      beam_A:           parseInt(document.getElementById('rx-beam-A').value),
+      beam_Z:           parseInt(document.getElementById('rx-beam-Z').value),
+      target_A:         parseInt(document.getElementById('rx-tgt-A').value),
+      target_Z:         parseInt(document.getElementById('rx-tgt-Z').value),
+      light_A:          parseInt(document.getElementById('rx-rec-A').value),
+      light_Z:          parseInt(document.getElementById('rx-rec-Z').value),
+      beam_energy_MeVu: parseFloat(document.getElementById('rx-energy').value),
+    },
   };
   try {
-    // POST rxData directly to /api/build_reaction — saves + builds in one step
-    const r = await fetch('/api/build_reaction', {
+    const r = await fetch('/api/state', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(rxData)
+      body: JSON.stringify(payload)
     });
     const d = await r.json();
     if (d.ok) {
-      applyReactionConfig(d.reaction);
-      status.textContent = 'Computed: ' + (d.reaction.reaction_str || '') + '  Q=' + (d.reaction.Q||0).toFixed(3) + ' MeV';
+      const rx = {...d.state.reaction, ...d.state.computed};
+      applyReactionConfig(rx);
+      status.textContent = 'Computed: ' + (rx.reaction_str || '') + '  Q=' + (rx.Q||0).toFixed(3) + ' MeV';
       status.style.color = '#3fb950';
     } else {
       status.textContent = '⚠ ' + d.error;
@@ -1458,74 +1483,48 @@ document.getElementById('load-config-btn').addEventListener('click', async () =>
   const status = document.getElementById('config-status');
   btn.disabled = true; btn.textContent = '⟳ Loading...';
   try {
-    // 1) Fetch config from digios — marks both JSONs as source=digios
+    // Load from digios — /api/config reads detectorGeo + reactionConfig, saves + returns state
     const resp = await fetch('/api/config');
     const d = await resp.json();
+    if (!d.ok) throw new Error(d.error || 'Load digios failed');
 
-    // Update panel inputs from detectorGeo.txt
-    if (d.detGeo) {
-      document.getElementById('array-pos').value  = d.detGeo.firstPos;
-      document.getElementById('rdt-pos').value    = d.detGeo.recoilPos;
-      document.getElementById('bfield').value     = d.detGeo.Bfield;
-      document.getElementById('bfield-val').value = parseFloat(d.detGeo.Bfield).toFixed(2);
-      if (GEO) GEO.Bfield = d.detGeo.Bfield;
+    const st = d.state;
+    if (!st) throw new Error('No state returned from /api/config');
+
+    const geo = st.geometry || {};
+    const rxn = st.reaction || {};
+    const comp = st.computed || {};
+
+    // Update geometry panel
+    if (geo.firstPos  !== undefined) { document.getElementById('array-pos').value  = geo.firstPos;  }
+    if (geo.recoilPos !== undefined) { document.getElementById('rdt-pos').value    = geo.recoilPos; }
+    if (geo.Bfield    !== undefined) {
+      document.getElementById('bfield').value     = geo.Bfield;
+      document.getElementById('bfield-val').value = parseFloat(geo.Bfield).toFixed(2);
+      if (GEO) GEO.Bfield = geo.Bfield;
     }
 
-    // Update reaction panel inputs from reactionConfig.txt
-    if (d.reactionConfig) {
-      const rc = d.reactionConfig;
-      document.getElementById('rx-beam-A').value = rc.beam_A;
-      document.getElementById('rx-beam-Z').value = rc.beam_Z;
-      document.getElementById('rx-tgt-A').value  = rc.target_A;
-      document.getElementById('rx-tgt-Z').value  = rc.target_Z;
-      document.getElementById('rx-rec-A').value  = rc.recoil_light_A;
-      document.getElementById('rx-rec-Z').value  = rc.recoil_light_Z;
-      document.getElementById('rx-energy').value = rc.beam_energy_MeVu;
-      const bsym = document.getElementById('rx-beam-sym');
-      const tsym = document.getElementById('rx-tgt-sym');
-      const rsym = document.getElementById('rx-rec-sym');
-      if (bsym && rc.beam_label)         bsym.value = rc.beam_label;
-      if (tsym && rc.target_label)       tsym.value = rc.target_label;
-      if (rsym && rc.recoil_light_label) rsym.value = rc.recoil_light_label;
-      buildBeamArrow();
-      buildTarget();
-    }
+    // Update reaction panel
+    if (rxn.beam_A)   document.getElementById('rx-beam-A').value = rxn.beam_A;
+    if (rxn.beam_Z)   document.getElementById('rx-beam-Z').value = rxn.beam_Z;
+    if (rxn.target_A) document.getElementById('rx-tgt-A').value  = rxn.target_A;
+    if (rxn.target_Z) document.getElementById('rx-tgt-Z').value  = rxn.target_Z;
+    if (rxn.light_A)  { document.getElementById('rx-rec-A').value = rxn.light_A; document.getElementById('rx-rec-Z').value = rxn.light_Z; }
+    if (rxn.beam_energy_MeVu) document.getElementById('rx-energy').value = rxn.beam_energy_MeVu;
+    const bsym = document.getElementById('rx-beam-sym');
+    const tsym = document.getElementById('rx-tgt-sym');
+    const rsym = document.getElementById('rx-rec-sym');
+    if (bsym && comp.beam_label)         bsym.value = comp.beam_label;
+    if (tsym && comp.target_label)       tsym.value = comp.target_label;
+    if (rsym && comp.recoil_light_label) rsym.value = comp.recoil_light_label;
 
-    // 2) Move detectors according to helios_geometry.json positions
-    if (d.detGeo && GEO) {
-      const newFP = d.detGeo.firstPos;
-      const newRP = d.detGeo.recoilPos;
-      const delta = newFP - GEO.firstPos;
+    // Apply kinematics + rebuild scene from new geometry
+    applyReactionConfig({...rxn, ...comp});
+    buildScene();  // full rebuild with new detectors from state
 
-      // Shift detector meshes
-      detMeshes.forEach(m => { m.position.z += delta; });
-      // Shift support tube group
-      if (tubeGroup) tubeGroup.position.z += delta;
-      // Move recoil ring
-      if (recoilGroup) recoilGroup.children.forEach(child => {
-        if (child.geometry) child.position.z = newRP;
-      });
-
-      // Update GEO in memory
-      GEO.detectors.forEach(det => { det.z_near += delta; det.z_center += delta; det.z += delta; });
-      GEO.firstPos = newFP;
-      GEO.zMin += delta; GEO.zMax += delta;
-      GEO._tubeZMin = GEO.zMin; GEO._tubeZMax = GEO.zMax;
-      GEO.recoilPos = newRP;
-
-      // Auto-position magnet and camera
-      autoPositionMagnet(GEO);
-      clearTracks();
-    }
-
-    const errStr = d.errors && d.errors.length ? ' | ⚠ ' + d.errors.join(', ') : '';
-    status.textContent = d.detGeo
-      ? 'Loaded: firstPos=' + d.detGeo.firstPos + 'mm  B=' + d.detGeo.Bfield + 'T' + errStr
-      : 'No detGeo' + errStr;
+    const errStr = (d.errors && d.errors.length) ? ' | ⚠ ' + d.errors.join(', ') : '';
+    status.textContent = `Loaded: firstPos=${geo.firstPos}mm  B=${geo.Bfield}T${errStr}`;
     status.style.color = '#3fb950';
-  } catch(e) {
-    status.textContent = 'Load failed: ' + e.message;
-    status.style.color = '#ff7b72';
   } finally {
     btn.disabled = false; btn.textContent = '↓ Load digios';
   }
@@ -1544,7 +1543,10 @@ async function _doApplyGeometry(newFirstPos, newRDTPos, status, btn) {
   // First rebuild helios_geometry.json with new positions
   if (status) { status.textContent = 'Rebuilding geometry...'; status.style.color = '#8b949e'; }
   try {
-    const r = await fetch(`/api/rebuild_geo?firstPos=${newFirstPos}&recoilPos=${newRDTPos}&Bfield=${GEO ? GEO.Bfield : -3}&config_source=manual`);
+    const r = await fetch('/api/state', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ config_source: 'manual', geometry: { firstPos: newFirstPos, recoilPos: newRDTPos, Bfield: GEO ? GEO.Bfield : -3 } })
+    });
     const d = await r.json();
     if (!d.ok) { if(status){ status.textContent = 'Rebuild failed: ' + d.error; status.style.color = '#ff7b72'; } if(btn) btn.disabled=false; return; }
   } catch(e) {
@@ -1606,10 +1608,13 @@ fetch('helios_geometry.json')
   .then(data => {
     setLoadingProgress(95, 'Building scene...');
     GEO = data;
-    buildScene();
-    // Load reaction after scene is built so buildBeamArrow/buildTarget have full context.
-    // Always load from saved helios_reaction.json regardless of config_source.
-    loadReactionJson();
+    // Ensure helios_config.json is loaded before building scene (needs ELEMENT_SYMBOLS)
+    heliosConfigReady.then(() => {
+      buildScene();
+      // Load reaction after scene is built so buildBeamArrow/buildTarget have full context.
+      loadReactionJson();
+      checkCapabilities();
+    });
     // Sync geometry panel from loaded JSON
     document.getElementById('bfield').value = data.Bfield;
     document.getElementById('bfield-val').value = parseFloat(data.Bfield).toFixed(2);
@@ -1707,6 +1712,24 @@ function stopRecording() {
     _recorder.stop();
     _recorder = null;
   }
+}
+
+// ── Capability detection ──────────────────────────────────────────────────────
+async function checkCapabilities() {
+  try {
+    const r = await fetch('/api/capabilities');
+    const d = await r.json();
+    if (!d.ok) return;
+    const loadBtn = document.getElementById('load-config-btn');
+    if (loadBtn) {
+      if (!d.digios) {
+        loadBtn.disabled = true;
+        loadBtn.title = 'digios not available on this server';
+        loadBtn.style.opacity = '0.4';
+        loadBtn.style.cursor = 'not-allowed';
+      }
+    }
+  } catch(e) {}
 }
 
 </script>

@@ -580,28 +580,23 @@ const COLORS = [
   'rgb(23,190,207)'
 ];
 
-// HELIOS geometry constants
-let heliosPosOffsets = [0, 58.6, 117.9, 176.8, 235.8, 294.5]; // mm
+// Spectrometer geometry — populated from helios_config.json via heliosConfigReady
+let heliosPosOffsets = [];
 let nDet = 6;
-let detLen = 50; // mm
-let perpDist = 11.5; // mm
-let detGap  = 5;   // mm
-let boreMM  = 462.5; // mm (used in bore curve)
+let detLen = 50;
+let perpDist = 11.5;
+let detGap  = 5;
+let boreMM  = 462.5;
 
 function setSSType(type) {
-  if (type === 'HELIOS') {
-    perpDist = 11.5; detGap = 5; detLen = 50; nDet = 6;
-    heliosPosOffsets = [0, 58.6, 117.9, 176.8, 235.8, 294.5];
-    boreMM = 462.5;
-  } else if (type === 'SOLARIS') {
-    perpDist = 11.5; detGap = 5; detLen = 50; nDet = 10;
-    // SOLARIS: evenly spaced, first det nearest target
-    heliosPosOffsets = Array.from({length:10}, (_,i) => i*(detLen+detGap));
-    boreMM = 462.5;
-  } else if (type === 'ISS') {
-    perpDist = 28.75; detGap = 0.5; detLen = 125; nDet = 4;
-    heliosPosOffsets = Array.from({length:4}, (_,i) => i*(detLen+detGap));
-    boreMM = 450;
+  const preset = HELIOS_SS_PRESETS[type];
+  if (preset) {
+    perpDist        = preset.perpDist    ?? 11.5;
+    detGap          = preset.detGap      ?? 5;
+    detLen          = preset.detLen      ?? 50;
+    nDet            = preset.nDet        ?? 6;
+    boreMM          = preset.bore        ?? 462.5;
+    heliosPosOffsets = preset.posOffsets  ?? [];
   }
   fullUpdate();
 }
@@ -972,7 +967,7 @@ function buildShapes(firstPos, rdtPos) {
   const shapesEZ = [];
   const shapesRZ = [];
 
-  // 6 HELIOS detectors
+  // Detector boxes — nDet/heliosPosOffsets populated from geometry JSON
   for (let i = 0; i < nDet; i++) {
     let z0, z1;
     if (firstPos < 0) {
@@ -1167,70 +1162,92 @@ function deleteRow() {
 // Sources: detectorGeo.txt (geometry) + reactionConfig.txt (nuclides)
 // Then auto-run build_reaction.py to recompute helios_reaction.json
 
+
+// ── Apply geometry constants from helios_geometry.json object ────────────────
+// Populates perpDist, detLen, nDet, heliosPosOffsets from the loaded JSON
+// so detector boxes in E-Z / R-Z plots match the actual geometry.
+function applyGeoConstants(gd) {
+  if (!gd) return;
+  if (gd.perpDist !== undefined) perpDist = gd.perpDist;
+  if (gd.length   !== undefined) detLen   = gd.length;
+  if (gd.bore     !== undefined) boreMM   = gd.bore;
+  if (gd.nDet     !== undefined) nDet     = gd.nDet;
+  // Reconstruct pos offsets from unique z_near values and firstPos
+  if (Array.isArray(gd.detectors) && gd.detectors.length > 0 && gd.firstPos !== undefined) {
+    const fp = gd.firstPos;
+    // Get unique z_near values for one phi (row=0), sorted nearest→furthest from target
+    const znears = [...new Set(gd.detectors.map(d => d.z_near))];
+    // For upstream (fp<0): nearest = highest z_near; downstream: nearest = lowest z_near
+    znears.sort((a, b) => fp < 0 ? b - a : a - b);
+    heliosPosOffsets = znears.map(z => Math.abs(z - fp));
+    nDet = znears.length;
+  }
+}
 // ── Load from saved helios_reaction.json only (manual config_source) ──────
 // Restores panel + nucCache from the saved JSON without hitting digios files.
+
+// ── Apply full helios_state to all UI panels ──────────────────────────────────
+function applyState(state) {
+  if (!state) return;
+  const geo  = state.geometry  || {};
+  const rxn  = state.reaction  || {};
+  const comp = state.computed  || {};
+  const ss   = state.ss_type   || 'HELIOS';
+
+  // SS type radio
+  const radio = document.querySelector(`input[name=sstype][value="${ss}"]`);
+  if (radio) { radio.checked = true; setSSType(ss); }
+
+  // Geometry sliders
+  if (geo.Bfield      !== undefined) { document.getElementById('sl-bfield').value = geo.Bfield; document.getElementById('sp-bfield').value = parseFloat(geo.Bfield).toFixed(2); }
+  if (geo.firstPos    !== undefined) { document.getElementById('sl-array').value  = geo.firstPos;  document.getElementById('sp-array').value  = geo.firstPos; }
+  if (geo.recoilPos   !== undefined) { document.getElementById('sl-rdt').value    = geo.recoilPos; document.getElementById('sp-rdt').value    = geo.recoilPos; }
+  if (geo.recoilInner !== undefined) { const el = document.getElementById('inp-rdt-inner'); if(el) el.value = geo.recoilInner; }
+  if (geo.recoilOuter !== undefined) { const el = document.getElementById('inp-rdt-outer'); if(el) el.value = geo.recoilOuter; }
+
+  // Reaction inputs
+  const azLabel = heliosNuclideName;
+  const bLabel  = comp.beam_label   || (rxn.beam_A   != null ? azLabel(rxn.beam_A,   rxn.beam_Z)   : '');
+  const tLabel  = comp.target_label || (rxn.target_A != null ? azLabel(rxn.target_A, rxn.target_Z) : '');
+  const lLabel  = comp.recoil_light_label || (rxn.light_A != null ? azLabel(rxn.light_A, rxn.light_Z) : '');
+  if (bLabel) document.getElementById('inp-beam').value   = bLabel;
+  if (tLabel) document.getElementById('inp-target').value = tLabel;
+  if (lLabel) document.getElementById('inp-light').value  = lLabel;
+  if (rxn.beam_energy_MeVu !== undefined) {
+    document.getElementById('inp-energy').value = rxn.beam_energy_MeVu;
+    document.getElementById('sl-energy').value  = Math.min(30, rxn.beam_energy_MeVu);
+  }
+
+  // nucCache
+  _currentReaction = comp;
+  refreshPotSelects();
+  if (rxn.beam_A   != null) nucCache.beam   = { A: rxn.beam_A,   Z: rxn.beam_Z,   mass: comp.Ma,     name: bLabel };
+  if (rxn.target_A != null) nucCache.target = { A: rxn.target_A, Z: rxn.target_Z, mass: comp.Mt,     name: tLabel };
+  if (rxn.light_A  != null) nucCache.light  = { A: rxn.light_A,  Z: rxn.light_Z,  mass: comp.mass_b, name: lLabel };
+  const hA = (rxn.beam_A||0)+(rxn.target_A||0)-(rxn.light_A||0);
+  const hZ = (rxn.beam_Z||0)+(rxn.target_Z||0)-(rxn.light_Z||0);
+  const hLabel = comp.recoil_heavy_label || azLabel(hA, hZ);
+  nucCache.heavy = { A: hA, Z: hZ, mass: comp.mass_B, name: hLabel };
+  fetch('/api/mass?A='+hA+'&Z='+hZ).then(r=>r.json()).then(md=>{
+    if (md.ok) { nucCache.heavy.Sn=md.Sn; nucCache.heavy.Sp=md.Sp; nucCache.heavy.Sa=md.Sa; }
+  }).catch(()=>{});
+
+  // Info panel
+  if (comp.Ma)     { document.getElementById('info-beam').textContent   = comp.Ma.toFixed(3)+' MeV/c²';    document.getElementById('info-beam').style.color='#1a8a3a'; }
+  if (comp.Mt)     { document.getElementById('info-target').textContent = comp.Mt.toFixed(3)+' MeV/c²';    document.getElementById('info-target').style.color='#1a8a3a'; }
+  if (comp.mass_b) { document.getElementById('info-light').textContent  = comp.mass_b.toFixed(3)+' MeV/c²'; document.getElementById('info-light').style.color='#1a8a3a'; }
+  document.getElementById('reaction-title').textContent = comp.reaction_str || '';
+  scheduleUpdate();
+}
+
 async function loadFromSavedJson() {
+  // Load from saved state (config_source=manual) — GET /api/state
   try {
-    const rc = await fetch('/api/reaction_config');
-    const rd = await rc.json();
-    if (!rd.ok || !rd.reaction) return;
-    const rx = rd.reaction;
-
-    // Restore geometry sliders from helios_geometry.json
-    try {
-      const rg = await fetch('/helios_geometry.json');
-      const gd = await rg.json();
-      if (gd.Bfield !== undefined) {
-        document.getElementById('sl-bfield').value = gd.Bfield;
-        document.getElementById('sp-bfield').value = parseFloat(gd.Bfield).toFixed(2);
-      }
-      if (gd.firstPos !== undefined) {
-        document.getElementById('sl-array').value = gd.firstPos;
-        document.getElementById('sp-array').value = gd.firstPos;
-      }
-      if (gd.recoilPos !== undefined) {
-        document.getElementById('sl-rdt').value = gd.recoilPos;
-        document.getElementById('sp-rdt').value = gd.recoilPos;
-      }
-    } catch(e) {}
-
-    // Restore reaction fields
-    if (rx.beam_label)         document.getElementById('inp-beam').value   = rx.beam_label;
-    if (rx.target_label)       document.getElementById('inp-target').value = rx.target_label;
-    if (rx.recoil_light_label) document.getElementById('inp-light').value  = rx.recoil_light_label;
-    if (rx.beam_energy_MeVu) {
-      document.getElementById('inp-energy').value = rx.beam_energy_MeVu;
-      document.getElementById('sl-energy').value  = Math.min(30, rx.beam_energy_MeVu);
-    }
-
-    // Restore nucCache + kinematics from saved computed fields
-    _currentReaction = rx;
-    refreshPotSelects();
-    const azLabel = heliosNuclideName;
-    if (rx.beam_A != null && rx.beam_Z != null)
-      nucCache.beam   = { A: rx.beam_A,         Z: rx.beam_Z,         mass: rx.Ma,     name: rx.beam_label   || azLabel(rx.beam_A,rx.beam_Z) };
-    if (rx.target_A != null && rx.target_Z != null)
-      nucCache.target = { A: rx.target_A,       Z: rx.target_Z,       mass: rx.Mt,     name: rx.target_label || azLabel(rx.target_A,rx.target_Z) };
-    if (rx.recoil_light_A != null && rx.recoil_light_Z != null)
-      nucCache.light  = { A: rx.recoil_light_A, Z: rx.recoil_light_Z, mass: rx.mass_b, name: rx.recoil_light_label || azLabel(rx.recoil_light_A,rx.recoil_light_Z) };
-
-    const hA = (rx.beam_A||0)+(rx.target_A||0)-(rx.recoil_light_A||0);
-    const hZ = (rx.beam_Z||0)+(rx.target_Z||0)-(rx.recoil_light_Z||0);
-    nucCache.heavy = { A: hA, Z: hZ, mass: rx.mass_B, name: rx.recoil_heavy_label || azLabel(hA,hZ) };
-    fetch('/api/mass?A=' + hA + '&Z=' + hZ).then(r=>r.json()).then(md=>{
-      if (md.ok) { nucCache.heavy.Sn=md.Sn; nucCache.heavy.Sp=md.Sp; nucCache.heavy.Sa=md.Sa; }
-    }).catch(()=>{});
-
-    document.getElementById('info-beam').textContent   = rx.Ma    ? rx.Ma.toFixed(3)+' MeV/c²'    : '?';
-    document.getElementById('info-target').textContent = rx.Mt    ? rx.Mt.toFixed(3)+' MeV/c²'    : '?';
-    document.getElementById('info-light').textContent  = rx.mass_b ? rx.mass_b.toFixed(3)+' MeV/c²' : '?';
-    ['info-beam','info-target','info-light'].forEach(id =>
-      document.getElementById(id).style.color = '#1a8a3a');
-    document.getElementById('reaction-title').textContent = rx.reaction_str || '';
-    scheduleUpdate();
+    const r = await fetch('/api/state');
+    const d = await r.json();
+    if (d.ok && d.state) applyState(d.state);
   } catch(e) {
     console.warn('loadFromSavedJson error:', e);
-    // Fallback: try individual lookups
     if (!nucCache.beam)   await lookupNuc('beam');
     if (!nucCache.target) await lookupNuc('target');
     if (!nucCache.light)  await lookupNuc('light');
@@ -1240,94 +1257,21 @@ async function loadFromSavedJson() {
 }
 
 async function loadFromServerFull() {
-  const statusEl = document.querySelector('#rx-status') || document.querySelector('#info-beam');
+  // Load from digios — GET /api/config (server reads detectorGeo + reactionConfig, saves state)
   try {
-    // Step 1: Read detectorGeo.txt + reactionConfig.txt via /api/config
-    const r2 = await fetch('/api/config');
-    const d2 = await r2.json();
-
-    if (d2.detGeo) {
-      const g = d2.detGeo;
-      if (g.Bfield !== undefined) {
-        document.getElementById('sl-bfield').value = g.Bfield;
-        document.getElementById('sp-bfield').value = parseFloat(g.Bfield).toFixed(2);
-      }
-      if (g.firstPos !== undefined) {
-        document.getElementById('sl-array').value = g.firstPos;
-        document.getElementById('sp-array').value = g.firstPos;
-      }
-      if (g.recoilPos !== undefined) {
-        document.getElementById('sl-rdt').value = g.recoilPos;
-        document.getElementById('sp-rdt').value = g.recoilPos;
-      }
-      if (g.recoilInner !== undefined)
-        document.getElementById('inp-rdt-inner').value = g.recoilInner;
-      if (g.recoilOuter !== undefined)
-        document.getElementById('inp-rdt-outer').value = g.recoilOuter;
-    }
-
-    if (d2.reactionConfig) {
-      const rc = d2.reactionConfig;
-      if (rc.beam_label)         document.getElementById('inp-beam').value   = rc.beam_label;
-      if (rc.target_label)       document.getElementById('inp-target').value = rc.target_label;
-      if (rc.recoil_light_label) document.getElementById('inp-light').value  = rc.recoil_light_label;
-      if (rc.beam_energy_MeVu) {
-        document.getElementById('inp-energy').value = rc.beam_energy_MeVu;
-        document.getElementById('sl-energy').value  = Math.min(30, rc.beam_energy_MeVu);
-      }
-
-      // Step 2+3: POST rxData to /api/build_reaction — saves + builds in one step
-      const rxData = {
-        beam_A: rc.beam_A, beam_Z: rc.beam_Z,
-        target_A: rc.target_A, target_Z: rc.target_Z,
-        recoil_light_A: rc.recoil_light_A, recoil_light_Z: rc.recoil_light_Z,
-        beam_energy_MeVu: rc.beam_energy_MeVu,
-        config_source: 'digios',
-      };
-      const rb = await fetch('/api/build_reaction', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(rxData)
-      });
-      const rbd = await rb.json();
-      if (rbd.ok && rbd.reaction) {
-        const rx = rbd.reaction;
-        _currentReaction = rx;
-        refreshPotSelects();
-        // Populate nucCache from freshly computed values
-        const EL_full = ELEMENT_SYMBOLS;
-        const azLabel = heliosNuclideName;
-        nucCache.beam   = { A: parseInt(rc.beam_A),         Z: parseInt(rc.beam_Z),         mass: rx.Ma,     name: rx.beam_label };
-        nucCache.target = { A: parseInt(rc.target_A),       Z: parseInt(rc.target_Z),       mass: rx.Mt,     name: rx.target_label };
-        nucCache.light  = { A: parseInt(rc.recoil_light_A), Z: parseInt(rc.recoil_light_Z), mass: rx.mass_b, name: rx.recoil_light_label };
-        const hA = parseInt(rc.beam_A)+parseInt(rc.target_A)-parseInt(rc.recoil_light_A);
-        const hZ = parseInt(rc.beam_Z)+parseInt(rc.target_Z)-parseInt(rc.recoil_light_Z);
-        // Fetch heavy Sn/Sp/Sa separately
-        nucCache.heavy  = { A: hA, Z: hZ, mass: rx.mass_B, name: rx.recoil_heavy_label || azLabel(hA,hZ) };
-        fetch('/api/mass?A=' + hA + '&Z=' + hZ).then(r=>r.json()).then(md=>{
-          if (md.ok) { nucCache.heavy.Sn=md.Sn; nucCache.heavy.Sp=md.Sp; nucCache.heavy.Sa=md.Sa; }
-        }).catch(()=>{});
-        document.getElementById('info-beam').textContent   = rx.Ma   ? rx.Ma.toFixed(3)+' MeV/c²'   : '?';
-        document.getElementById('info-target').textContent = rx.Mt   ? rx.Mt.toFixed(3)+' MeV/c²'   : '?';
-        document.getElementById('info-light').textContent  = rx.mass_b ? rx.mass_b.toFixed(3)+' MeV/c²' : '?';
-        ['info-beam','info-target','info-light'].forEach(id =>
-          document.getElementById(id).style.color = '#1a8a3a');
-        // Update page title with reaction string
-        document.getElementById('reaction-title').textContent = rx.reaction_str || '';
-        scheduleUpdate();
-      }
-    }
+    const r = await fetch('/api/config');
+    const d = await r.json();
+    if (!d.ok) { console.warn('loadFromServerFull:', d.error); return; }
+    if (d.state) applyState(d.state);
   } catch(e) {
     console.warn('loadFromServerFull error:', e);
   }
-
-  // Fallback: look up masses from API if nucCache incomplete
-  if (!nucCache.beam)  await lookupNuc('beam');
+  if (!nucCache.beam)   await lookupNuc('beam');
   if (!nucCache.target) await lookupNuc('target');
-  if (!nucCache.light) await lookupNuc('light');
+  if (!nucCache.light)  await lookupNuc('light');
   if (!nucCache.heavy && nucCache.beam && nucCache.target && nucCache.light) computeHeavy();
   scheduleUpdate();
 }
-
 // =====================================================================
 // RESIZE
 window.addEventListener('resize', () => {
@@ -1572,33 +1516,36 @@ function plotPtolemy(results, reactionLabel, ang_min, ang_max) {
 
 
 async function saveConfig() {
-  const btn = document.getElementById('save-config-btn');
+  const btn    = document.getElementById('save-config-btn');
   const status = document.getElementById('save-status');
   btn.disabled = true; status.textContent = 'Saving...';
   try {
-    const fp  = parseFloat(document.getElementById('sl-array').value);
-    const rp  = parseFloat(document.getElementById('sl-rdt').value);
-    // 1. Save helios_geometry.json
-    const bf = parseFloat(document.getElementById('sl-bfield').value);
-    const r1 = await fetch('/api/rebuild_geo?firstPos=' + fp + '&recoilPos=' + rp + '&Bfield=' + bf + '&config_source=manual');
-    const d1 = await r1.json();
-    if (!d1.ok) throw new Error('Geometry: ' + d1.error);
-    // 2. Save helios_reaction.json via POST /api/build_reaction
-    if (nucCache.beam && nucCache.target && nucCache.light && nucCache.heavy) {
-      const rxData = {
-        beam_A: nucCache.beam.A, beam_Z: nucCache.beam.Z,
-        target_A: nucCache.target.A, target_Z: nucCache.target.Z,
-        recoil_light_A: nucCache.light.A, recoil_light_Z: nucCache.light.Z,
+    const ssType = document.querySelector('input[name=sstype]:checked')?.value || 'HELIOS';
+    const payload = {
+      config_source: 'manual',
+      ss_type: ssType,
+      geometry: {
+        firstPos:    parseFloat(document.getElementById('sl-array').value),
+        recoilPos:   parseFloat(document.getElementById('sl-rdt').value),
+        Bfield:      parseFloat(document.getElementById('sl-bfield').value),
+        recoilInner: parseFloat(document.getElementById('inp-rdt-inner')?.value || 10),
+        recoilOuter: parseFloat(document.getElementById('inp-rdt-outer')?.value || 40.2),
+      },
+    };
+    if (nucCache.beam && nucCache.target && nucCache.light) {
+      payload.reaction = {
+        beam_A:           nucCache.beam.A,   beam_Z:   nucCache.beam.Z,
+        target_A:         nucCache.target.A, target_Z: nucCache.target.Z,
+        light_A:          nucCache.light.A,  light_Z:  nucCache.light.Z,
         beam_energy_MeVu: parseFloat(document.getElementById('inp-energy').value),
-        config_source: 'manual',
       };
-      const r2 = await fetch('/api/build_reaction', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(rxData)
-      });
-      const d2 = await r2.json();
-      if (!d2.ok) throw new Error('Reaction: ' + d2.error);
     }
+    const r = await fetch('/api/state', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Save failed');
     status.textContent = '✓ Saved (' + new Date().toLocaleTimeString() + ')';
     status.style.color = '#3fb950';
   } catch(e) {
@@ -1743,14 +1690,10 @@ function calThetaCM() {
 
 let _ndsLevelPopup = null;  // reusable popup window for ENSDF level plots
 
-const NDS_SHORTHAND = {
-  'n':'1n','p':'1H','d':'2H','D':'2H','t':'3H','T':'3H',
-  'h':'3He','H':'3He','a':'4He','A':'4He','alpha':'4He',
-};
-
 function ndsResolveIso(raw) {
+  // Use HELIOS_SHORTHAND from helios_config.json (single source of truth)
   const s = raw.trim();
-  const resolved = NDS_SHORTHAND[s] || s;
+  const resolved = HELIOS_SHORTHAND[s] || s;
   const m = resolved.match(/^(\d+)([A-Za-z]+)$/);
   if (!m) return null;
   const A = parseInt(m[1]);
@@ -2146,24 +2089,13 @@ window.addEventListener('load', () => {
     if (!tr.dataset.rowid) tr.dataset.rowid = i + 1;
   });
   refreshPotSelects();
-  // Check config_source in helios_reaction.json:
-  // 'digios' → load fresh from digios files; 'manual' → load saved JSON only (no digios)
+  // Load state from server — applyState() handles ss_type, geometry, reaction
+  // Config is read-only; state drives everything.
   (async () => {
-    let source = 'digios'; // default: load from digios if no JSON exists yet
-    try {
-      const rc = await fetch('/api/reaction_config');
-      const rd = await rc.json();
-      if (rd.ok && rd.reaction && rd.reaction.config_source) {
-        source = rd.reaction.config_source;
-      }
-    } catch(e) {}
-    if (source === 'digios') {
-      await loadFromServerFull();
-    } else {
-      // Manual save: restore from saved helios_reaction.json only, skip digios
-      await loadFromSavedJson();
-    }
+    await heliosConfigReady;  // ensure ELEMENT_SYMBOLS + SS presets loaded first
+    await loadFromSavedJson(); // always load from /api/state on startup
   })();
+  checkCapabilities();
   ndsInit();
 
   // Init misc calculators
@@ -2234,6 +2166,39 @@ function yieldCal() {
   const days = wanted / sf / yieldPS / 86400;
   document.getElementById('yld-days').textContent = isFinite(days) ? days.toPrecision(4) : '—';
 }
+// ── Capability detection: hide features not available on this server ──────────
+async function checkCapabilities() {
+  try {
+    const r = await fetch('/api/capabilities');
+    const d = await r.json();
+    if (!d.ok) return;
+
+    // Ptolemy DWBA: hide section if ptolemy binary not found
+    const ptolSec = document.getElementById('ptolemy-section');
+    if (ptolSec) ptolSec.style.display = d.ptolemy ? '' : 'none';
+
+    // Load digios button: disable + grey out if digios files not present
+    const loadBtn = document.querySelector('button[onclick="loadFromServerFull()"]');
+    if (loadBtn) {
+      if (!d.digios) {
+        loadBtn.disabled = true;
+        loadBtn.title = 'digios not available on this server';
+        loadBtn.style.opacity = '0.4';
+        loadBtn.style.cursor = 'not-allowed';
+      } else {
+        loadBtn.disabled = false;
+        loadBtn.title = '';
+        loadBtn.style.opacity = '';
+        loadBtn.style.cursor = '';
+      }
+    }
+  } catch(e) {
+    // Server doesn't support /api/capabilities — assume standalone, hide Ptolemy
+    const ptolSec = document.getElementById('ptolemy-section');
+    if (ptolSec) ptolSec.style.display = 'none';
+  }
+}
+
 </script>
 </body>
 </html>

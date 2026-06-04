@@ -1,33 +1,50 @@
 /**
  * helios_common.js — Shared utilities for HELIOS 3D viewer and Kinematics page
+ *
+ * ELEMENT_SYMBOLS, HELIOS_SHORTHAND, and spectrometer presets are loaded from
+ * /helios_config.json at runtime — no hardcoded data here.
  */
 
-// ── Element symbols (Z=0..49) ──────────────────────────────────────────────
-const ELEMENT_SYMBOLS = [
-  'n','H','He','Li','Be','B','C','N','O','F','Ne',
-  'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
-  'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',
-  'Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr',
-  'Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn',
-  'Sb','Te','I','Xe','Cs','Ba','La','Ce','Pr','Nd',
-  'Pm','Sm','Eu','Gd','Tb','Dy','Ho','Er','Tm','Yb',
-  'Lu','Hf','Ta','W','Re','Os','Ir','Pt','Au','Hg',
-  'Tl','Pb','Bi','Po','At','Rn','Fr','Ra','Ac','Th',
-  'Pa','U','Np','Pu','Am','Cm','Bk','Cf','Es','Fm',
-];
+// ── Runtime config (populated by initHeliosConfig) ────────────────────────
+let ELEMENT_SYMBOLS = [];   // filled from helios_config.json
+let HELIOS_SHORTHAND = {};  // filled from helios_config.json
+let HELIOS_SS_PRESETS = {}; // filled from helios_config.json
 
-// Shorthand aliases → canonical nuclide symbols
-const HELIOS_SHORTHAND = {
-  'n':'1n', 'p':'1H',
-  'd':'2H', 'D':'2H',
-  't':'3H', 'T':'3H',
-  'h':'3He', 'H':'3He', '3he':'3He',
-  'a':'4He', 'A':'4He', 'alpha':'4He', 'Alpha':'4He',
-};
+// Promise that resolves when config is loaded — pages await this before using
+// ELEMENT_SYMBOLS or HELIOS_SHORTHAND.
+let _configResolve;
+const heliosConfigReady = new Promise(res => { _configResolve = res; });
+
+async function initHeliosConfig() {
+  try {
+    const r = await fetch('/helios_config.json');
+    const cfg = await r.json();
+    ELEMENT_SYMBOLS  = cfg.element_symbols  || [];
+    HELIOS_SHORTHAND = cfg.shorthands       || {};
+    HELIOS_SS_PRESETS = cfg.spectrometers   || {};
+  } catch(e) {
+    console.warn('helios_common: could not load helios_config.json, using built-in fallback', e);
+    // Minimal fallback so pages don't break completely
+    ELEMENT_SYMBOLS = [
+      'n','H','He','Li','Be','B','C','N','O','F','Ne',
+      'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
+      'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn'
+    ];
+    HELIOS_SHORTHAND = {
+      'n':'1n','p':'1H','d':'2H','D':'2H','t':'3H','T':'3H',
+      'h':'3He','H':'3He','a':'4He','A':'4He','alpha':'4He'
+    };
+  }
+  _configResolve();
+}
+
+// Kick off immediately — pages can await heliosConfigReady
+initHeliosConfig();
 
 /**
  * Resolve a nuclide symbol string (with shorthand support) to {A, Z, sym, name}.
  * Returns null if the string cannot be parsed.
+ * Case-sensitive: 'n'=neutron(Z=0), 'N'=nitrogen(Z=7).
  */
 function heliosParseNuclide(raw) {
   const resolved = HELIOS_SHORTHAND[raw] || HELIOS_SHORTHAND[raw?.toLowerCase()] || raw;
@@ -36,8 +53,7 @@ function heliosParseNuclide(raw) {
   if (!m) return null;
   const A = parseInt(m[1]);
   const sym = m[2];
-  // Case-sensitive lookup: canonicalize to Title-case (e.g. "n"->"n", "N"->"N", "he"->"He")
-  // ELEMENT_SYMBOLS[0]="n" (neutron), ELEMENT_SYMBOLS[7]="N" (nitrogen) -- must not conflate them.
+  // Title-case canonicalization: single-char kept as-is, multi-char → first upper rest lower
   const symCanon = sym.length === 1 ? sym : sym[0].toUpperCase() + sym.slice(1).toLowerCase();
   const Z = ELEMENT_SYMBOLS.findIndex(s => s === symCanon);
   if (Z < 0) return null;
@@ -57,12 +73,9 @@ function heliosNuclideName(A, Z) {
  */
 async function heliosMassLookup(AZ_or_A, Z) {
   try {
-    let url;
-    if (Z !== undefined) {
-      url = `/api/mass?A=${AZ_or_A}&Z=${Z}`;
-    } else {
-      url = `/api/mass?AZ=${encodeURIComponent(AZ_or_A)}`;
-    }
+    const url = Z !== undefined
+      ? `/api/mass?A=${AZ_or_A}&Z=${Z}`
+      : `/api/mass?AZ=${encodeURIComponent(AZ_or_A)}`;
     const r = await fetch(url);
     const d = await r.json();
     return d.ok ? d : null;
@@ -73,7 +86,6 @@ async function heliosMassLookup(AZ_or_A, Z) {
 
 /**
  * Load geometry + reaction config from digios via server API.
- * Returns { detGeo, reactionConfig, reaction, errors } or null on failure.
  */
 async function heliosLoadConfig() {
   try {
@@ -86,10 +98,8 @@ async function heliosLoadConfig() {
 
 /**
  * Run build_reaction.py via server API.
- * Returns { ok, reaction, output } or null on failure.
  */
 async function heliosBuildReaction(rxData) {
-  // Single POST to /api/build_reaction — saves rxData + runs build_reaction.py
   try {
     const ctrl = new AbortController();
     const timeout = setTimeout(() => ctrl.abort(), 15000);
@@ -108,7 +118,6 @@ async function heliosBuildReaction(rxData) {
 
 /**
  * Format nuclide label as superscript-A + symbol on a canvas.
- * Returns a canvas element (no THREE dependency).
  */
 function heliosMakeNuclideCanvas(rawLabel, colorHex, w=256, h=96) {
   const canvas = document.createElement('canvas');

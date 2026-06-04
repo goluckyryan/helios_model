@@ -178,13 +178,14 @@ def load_geometry(geo_file="detectorGeo.txt"):
     for d in detectors:
         d['col'] = nDet - 1 - d['col']  # flip: col 0 = nearest target always
 
-    # Re-ID: side order depends on array orientation
-    # Upstream (firstPos<0): array faces target from upstream — side order -X,-Y,+X,+Y
-    # Downstream (firstPos>0): array rotated 180° around Y — side order +X,+Y,-X,-Y
+    # Re-ID: side order depends on array orientation and mDet.
+    # For mDet=4: upstream starts at -X(row2), downstream at +X(row0).
+    # For arbitrary mDet: upstream rotates starting index by mDet//2, downstream starts at 0.
     if firstPos < 0:
-        side_order = [2, 3, 0, 1]  # -X(row2), -Y(row3), +X(row0), +Y(row1)
+        start = mDet // 2  # upstream: rotate half-turn so det0 faces away from target
     else:
-        side_order = [0, 1, 2, 3]  # +X(row0), +Y(row1), -X(row2), -Y(row3)
+        start = 0          # downstream: det0 at +X (phi=0)
+    side_order = [(start + i) % mDet for i in range(mDet)]
     new_id = 0
     # col 0 = nearest target always; iterate col 0 first so detID%nDet==0 = nearest
     col_order = range(0, nDet)

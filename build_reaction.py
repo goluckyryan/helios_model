@@ -159,13 +159,6 @@ def compute_kinematics(reaction, masses):
     # For compatibility, set alpha=0 (not used in viewer)
     alpha = 0.0
 
-    print(f"\nReaction: {reaction_str}")
-    print(f"  Ma={Ma:.4f}  Mt={Mt:.4f}  Mb={Mb:.4f}  MB={MB:.4f} MeV")
-    print(f"  Elab={Elab:.2f} MeV  Ecm={Ecm:.4f} MeV")
-    print(f"  betaCM={betaCM:.8f}  gammaCM={gammaCM:.6f}")
-    print(f"  Q={Q:.4f} MeV  {'exothermic' if Q>0 else 'endothermic'}")
-    print(f"  Heavy recoil: {AB}{sym_B} (Z={ZB})")
-
     return {
         'mass_b':    Mb,
         'charge_b':  Zb,
@@ -182,6 +175,16 @@ def compute_kinematics(reaction, masses):
         'reaction_str': reaction_str,
         'Ma': Ma, 'Mt': Mt, 'Mb': Mb, 'MB': MB,
     }
+
+
+def compute_kinematics_from_state(rxn, masses):
+    """Adapter: accepts state reaction dict (light_A/Z) and calls compute_kinematics."""
+    adapted = dict(rxn)
+    # Map light_A/Z → recoil_light_A/Z if needed
+    if 'light_A' in adapted and 'recoil_light_A' not in adapted:
+        adapted['recoil_light_A'] = adapted.pop('light_A')
+        adapted['recoil_light_Z'] = adapted.pop('light_Z')
+    return compute_kinematics(adapted, masses)
 
 def write_reaction_dat(result, path):
     with open(path, 'w') as f:
