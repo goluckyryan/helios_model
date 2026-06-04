@@ -26,7 +26,7 @@
     .section h3 { font-size:11px; font-weight:bold; color:#555; margin-bottom:5px; text-transform:uppercase; letter-spacing:0.4px; }
 
     .ctrl-row { display:flex; align-items:center; gap:5px; margin:3px 0; }
-    .ctrl-row label { font-size:12px; color:#555; width:112px; min-width:112px; flex-shrink:0; }
+    .ctrl-row label { font-size:12px; color:#555; width:70px; min-width:70px; flex-shrink:0; }
     .ctrl-row input[type=range] { flex:1; min-width:0; }
     .ctrl-row .spinbox { flex-shrink:0; }
 
@@ -183,21 +183,18 @@
                min="-5" max="0" step="0.05"
                oninput="syncSliderFromSpin('bfield');fullUpdate();">
       </div>
-      <div class="ctrl-row" style="justify-content:flex-end;">
-        <span style="font-size:10px;color:#aaa;">T (-5..0)</span>
-      </div>
       <div class="ctrl-row">
         <label>Beam E (MeV/u)</label>
         <input type="range" id="sl-energy" min="0.1" max="30" value="8.8" step="0.1"
-               style="max-width:80px;" oninput="document.getElementById('inp-energy').value=parseFloat(this.value).toFixed(1);fullUpdate();">
+               oninput="document.getElementById('inp-energy').value=parseFloat(this.value).toFixed(1);fullUpdate();">
         <input type="number" class="spinbox" id="inp-energy" value="8.8"
-               min="0.1" max="500" step="0.1" style="width:55px;"
+               min="0.1" max="500" step="0.1" style="width:62px;"
                oninput="document.getElementById('sl-energy').value=this.value;fullUpdate();">
       </div>
       <div class="ctrl-row">
-        <label>Beam E<sub>x</sub> (MeV)</label>
+        <label style="flex:1;width:auto;min-width:auto;">Beam E<sub>x</sub> (MeV)</label>
         <input type="number" class="spinbox" id="inp-beamex" value="0.0"
-               min="0" max="50" step="0.001" oninput="scheduleUpdate()">
+               min="0" max="50" step="0.001" style="width:62px;" oninput="scheduleUpdate()">
       </div>
       <div style="margin-top:6px;">
         <button onclick="loadFromServerFull()">&#8595; Load digios</button>
@@ -212,7 +209,7 @@
     </div>
 
     <div class="section">
-      <h3>Geometry</h3>
+      <h3>Geometry <span style="font-size:10px;color:#888;font-weight:normal;">( length in mm )</span></h3>
       <div class="ctrl-row" style="gap:12px;">
         <label style="width:auto;min-width:auto;">System</label>
         <label style="width:auto;min-width:auto;"><input type="radio" name="sstype" value="HELIOS" checked onchange="setSSType(this.value)"> HELIOS</label>
@@ -227,9 +224,6 @@
                min="-800" max="800" step="1"
                oninput="syncSliderFromSpin(&apos;array&apos;);fastRelayout();scheduleUpdate();">
       </div>
-      <div class="ctrl-row" style="justify-content:flex-end;">
-        <span style="font-size:10px;color:#aaa;">mm (-800..800)</span>
-      </div>
       <div class="ctrl-row">
         <label>RDT pos</label>
         <input type="range" id="sl-rdt" min="100" max="3000" value="1000" step="10"
@@ -238,16 +232,13 @@
                min="100" max="3000" step="10"
                oninput="syncSliderFromSpin(&apos;rdt&apos;);fastRelayout();scheduleUpdate();">
       </div>
-      <div class="ctrl-row" style="justify-content:flex-end;">
-        <span style="font-size:10px;color:#aaa;">mm (100..3000)</span>
-      </div>
       <div class="ctrl-row">
-        <label>RDT inner (mm)</label>
+        <label>RDT inner</label>
         <input type="number" class="spinbox" id="inp-rdt-inner" value="10" min="0" max="200" step="1"
                oninput="fastRelayout();" style="width:55px;">
       </div>
       <div class="ctrl-row">
-        <label>RDT outer (mm)</label>
+        <label>RDT outer</label>
         <input type="number" class="spinbox" id="inp-rdt-outer" value="40.2" min="1" max="500" step="0.5"
                oninput="fastRelayout();" style="width:55px;">
       </div>
@@ -260,7 +251,7 @@
         <input type="range" id="sl-emax" min="3" max="20" value="12" step="0.5"
                style="flex:1;" oninput="document.getElementById('inp-emax').value=parseFloat(this.value).toFixed(1);fullUpdate();">
         <input type="number" class="spinbox" id="inp-emax" value="12"
-               min="1" max="100" step="0.5" style="width:50px;"
+               min="1" max="100" step="0.5" style="width:60px;"
                oninput="document.getElementById('sl-emax').value=Math.min(20,Math.max(3,this.value));fullUpdate();">
       </div>
       <div class="ctrl-row">
@@ -268,34 +259,34 @@
         <input type="range" id="sl-thline" min="0" max="90" value="0" step="0.1"
                style="flex:1;" oninput="document.getElementById('sp-thline').value=this.value;fullUpdate();">
         <input type="number" class="spinbox" id="sp-thline" value="0"
-               min="0" max="90" step="0.1" style="width:50px;"
+               min="0" max="90" step="0.1" style="width:60px;"
                oninput="document.getElementById('sl-thline').value=this.value;fullUpdate();">
       </div>
       <div class="ctrl-row">
         <label>&#952;<sub>CM</sub> steps</label>
         <input type="number" class="spinbox" id="inp-thsteps" value="200"
-               min="20" max="5000" step="10" oninput="scheduleUpdate()">
+               min="20" max="5000" step="10" style="width:60px;" oninput="scheduleUpdate()">
       </div>
       <div class="ctrl-row">
-        <label>Z min (mm)</label>
+        <label>Z min</label>
         <input type="range" id="sl-zmin" min="-3000" max="0" value="-600" step="10"
                style="flex:1;" oninput="document.getElementById('inp-zmin').value=this.value;fastRelayout();">
         <input type="number" class="spinbox" id="inp-zmin" value="-600" min="-3000" max="0" step="10"
                style="width:60px;" oninput="document.getElementById('sl-zmin').value=this.value;fastRelayout();">
       </div>
       <div class="ctrl-row">
-        <label>Z max (mm)</label>
+        <label>Z max</label>
         <input type="range" id="sl-zmax" min="-500" max="3000" value="1000" step="10"
                style="flex:1;" oninput="document.getElementById('inp-zmax').value=this.value;fastRelayout();">
         <input type="number" class="spinbox" id="inp-zmax" value="1000" min="-500" max="3000" step="10"
                style="width:60px;" oninput="document.getElementById('sl-zmax').value=this.value;fastRelayout();">
       </div>
       <div class="ctrl-row">
-        <label>R max (mm)</label>
+        <label>R max</label>
         <input type="range" id="sl-rmax" min="5" max="200" value="50" step="1"
                style="flex:1;" oninput="document.getElementById('inp-rmax').value=this.value;fastRelayout();">
         <input type="number" class="spinbox" id="inp-rmax" value="50" min="5" max="500" step="1"
-               style="width:50px;" oninput="document.getElementById('sl-rmax').value=Math.min(200,this.value);fastRelayout();">
+               style="width:60px;" oninput="document.getElementById('sl-rmax').value=Math.min(200,this.value);fastRelayout();">
       </div>
     </div>
 
@@ -337,17 +328,18 @@
         <div id="nds-err-msg" style="display:none;">&#9888; Unable to reach the MCP server</div>
         <div id="nds-controls" style="display:none;">
           <div class="ctrl-row">
-            <label style="width:56px;min-width:56px;">Isotope</label>
-            <input type="text" id="nds-iso" class="nuc-inp" style="width:70px;"
+            <label style="width:150px;min-width:150px;">Isotope</label>
+            <input type="text" id="nds-iso" class="nuc-inp" style="width:100px;"
                    placeholder="e.g. 12C">
           </div>
           <div class="ctrl-row">
-            <label style="width:56px;min-width:56px;">Ex max (MeV,<br>ENSDF)</label>
-            <input type="number" id="nds-exmax" class="spinbox" style="width:70px;"
+            <label style="width:150px;min-width:150px;">Ex max (MeV, ENSDF)</label>
+            <input type="number" id="nds-exmax" class="spinbox" style="width:100px;"
                    min="0" step="0.1" placeholder="optional">
           </div>
-          <div style="display:flex;gap:4px;margin-top:2px;">
-            <button id="nds-retrieve-btn" onclick="ndsRetrieve()">&#128269; Retrieve</button>
+          <div class="ctrl-row">
+            <label style="width:150px;min-width:150px;"></label>
+            <button id="nds-retrieve-btn" onclick="ndsRetrieve()" style="width:100px;">&#128269; Retrieve</button>
           </div>
           <div id="nds-results" style="display:none;"></div>
           <div id="nds-levels" style="display:none;"></div>
@@ -389,7 +381,7 @@
         <tbody id="ex-tbody">
           <tr>
             <td><input type="number" id="Ex1" value="0.000" step="0.001" oninput="scheduleUpdate()"></td>
-            <td><input type="number" id="theta1" value="45" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
+            <td><input type="number" id="theta1" value="10" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
             <td><input type="text" class="orb-inp" id="orb1" value="0s1/2" placeholder="0s1/2"></td>
             <td><input type="text" class="orb-inp" id="jpi1" value="0+"></td>
             <td id="potIn1-cell"></td><td id="potOut1-cell"></td>
@@ -401,7 +393,7 @@
           </tr>
           <tr>
             <td><input type="number" id="Ex2" value="1.000" step="0.001" oninput="scheduleUpdate()"></td>
-            <td><input type="number" id="theta2" value="45" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
+            <td><input type="number" id="theta2" value="20" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
             <td><input type="text" class="orb-inp" id="orb2" value="0p3/2" placeholder="0p3/2"></td>
             <td><input type="text" class="orb-inp" id="jpi2" value="2+"></td>
             <td id="potIn2-cell"></td><td id="potOut2-cell"></td>
@@ -413,7 +405,7 @@
           </tr>
           <tr>
             <td><input type="number" id="Ex3" value="2.000" step="0.001" oninput="scheduleUpdate()"></td>
-            <td><input type="number" id="theta3" value="45" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
+            <td><input type="number" id="theta3" value="30" min="1" max="179" step="1" oninput="scheduleUpdate()"></td>
             <td><input type="text" class="orb-inp" id="orb3" value="0p1/2" placeholder="0p1/2"></td>
             <td><input type="text" class="orb-inp" id="jpi3" value="2-"></td>
             <td id="potIn3-cell"></td><td id="potOut3-cell"></td>
@@ -1126,7 +1118,7 @@ function addRow() {
     else if (h.Sp) exMax = h.Sp;
   }
   const randEx    = (Math.random() * exMax).toFixed(3);
-  const randTheta = Math.floor(Math.random() * 40 + 1); // 1-40 deg
+  const randTheta = Math.floor(Math.random() * 21 + 10); // 10-30 deg
 
   tr.innerHTML =
     '<td><input type="number" id="Ex' + id + '" value="' + randEx + '" step="0.001" oninput="scheduleUpdate()"></td>' +
@@ -1163,13 +1155,13 @@ function deleteRow() {
 // Then auto-run build_reaction.py to recompute helios_reaction.json
 
 
-// ── Apply geometry constants from helios_geometry.json object ────────────────
+// ── Apply geometry constants from state.computed / preset object ───────────────
 // Populates perpDist, detLen, nDet, heliosPosOffsets from the loaded JSON
 // so detector boxes in E-Z / R-Z plots match the actual geometry.
 function applyGeoConstants(gd) {
   if (!gd) return;
   if (gd.perpDist !== undefined) perpDist = gd.perpDist;
-  if (gd.length   !== undefined) detLen   = gd.length;
+  if (gd.detLen   !== undefined) detLen   = gd.detLen;
   if (gd.bore     !== undefined) boreMM   = gd.bore;
   if (gd.nDet     !== undefined) nDet     = gd.nDet;
   // Reconstruct pos offsets from unique z_near values and firstPos
@@ -1209,7 +1201,7 @@ function applyState(state) {
   const azLabel = heliosNuclideName;
   const bLabel  = comp.beam_label   || (rxn.beam_A   != null ? azLabel(rxn.beam_A,   rxn.beam_Z)   : '');
   const tLabel  = comp.target_label || (rxn.target_A != null ? azLabel(rxn.target_A, rxn.target_Z) : '');
-  const lLabel  = comp.recoil_light_label || (rxn.light_A != null ? azLabel(rxn.light_A, rxn.light_Z) : '');
+  const lLabel  = comp.light_label || (rxn.light_A != null ? azLabel(rxn.light_A, rxn.light_Z) : '');
   if (bLabel) document.getElementById('inp-beam').value   = bLabel;
   if (tLabel) document.getElementById('inp-target').value = tLabel;
   if (lLabel) document.getElementById('inp-light').value  = lLabel;
@@ -1226,7 +1218,7 @@ function applyState(state) {
   if (rxn.light_A  != null) nucCache.light  = { A: rxn.light_A,  Z: rxn.light_Z,  mass: comp.mass_b, name: lLabel };
   const hA = (rxn.beam_A||0)+(rxn.target_A||0)-(rxn.light_A||0);
   const hZ = (rxn.beam_Z||0)+(rxn.target_Z||0)-(rxn.light_Z||0);
-  const hLabel = comp.recoil_heavy_label || azLabel(hA, hZ);
+  const hLabel = comp.heavy_label || azLabel(hA, hZ);
   nucCache.heavy = { A: hA, Z: hZ, mass: comp.mass_B, name: hLabel };
   fetch('/api/mass?A='+hA+'&Z='+hZ).then(r=>r.json()).then(md=>{
     if (md.ok) { nucCache.heavy.Sn=md.Sn; nucCache.heavy.Sp=md.Sp; nucCache.heavy.Sa=md.Sa; }

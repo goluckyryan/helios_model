@@ -14,8 +14,7 @@ mcp.json
 # Computed files (auto-generated from digios or build scripts)
 # FALLBACK in index.html provides defaults when these are absent
 reaction.dat
-helios_geometry.json
-helios_reaction.json
+helios_state.json
 !helios_config.json
 
 # OS

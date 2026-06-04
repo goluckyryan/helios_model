@@ -16,25 +16,14 @@ let _configResolve;
 const heliosConfigReady = new Promise(res => { _configResolve = res; });
 
 async function initHeliosConfig() {
-  try {
-    const r = await fetch('/helios_config.json');
-    const cfg = await r.json();
-    ELEMENT_SYMBOLS  = cfg.element_symbols  || [];
-    HELIOS_SHORTHAND = cfg.shorthands       || {};
-    HELIOS_SS_PRESETS = cfg.spectrometers   || {};
-  } catch(e) {
-    console.warn('helios_common: could not load helios_config.json, using built-in fallback', e);
-    // Minimal fallback so pages don't break completely
-    ELEMENT_SYMBOLS = [
-      'n','H','He','Li','Be','B','C','N','O','F','Ne',
-      'Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca',
-      'Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn'
-    ];
-    HELIOS_SHORTHAND = {
-      'n':'1n','p':'1H','d':'2H','D':'2H','t':'3H','T':'3H',
-      'h':'3He','H':'3He','a':'4He','A':'4He','alpha':'4He'
-    };
-  }
+  // helios_config.json is committed to the repo and served by viewer/server.py.
+  // If this fetch fails the deployment is broken — fail loud, don't paper over it.
+  const r = await fetch('/helios_config.json');
+  if (!r.ok) throw new Error('helios_config.json unreachable: HTTP ' + r.status);
+  const cfg = await r.json();
+  ELEMENT_SYMBOLS   = cfg.element_symbols || [];
+  HELIOS_SHORTHAND  = cfg.shorthands      || {};
+  HELIOS_SS_PRESETS = cfg.spectrometers   || {};
   _configResolve();
 }
 
@@ -81,38 +70,6 @@ async function heliosMassLookup(AZ_or_A, Z) {
     return d.ok ? d : null;
   } catch(e) {
     return null;
-  }
-}
-
-/**
- * Load geometry + reaction config from digios via server API.
- */
-async function heliosLoadConfig() {
-  try {
-    const r = await fetch('/api/config');
-    return await r.json();
-  } catch(e) {
-    return null;
-  }
-}
-
-/**
- * Run build_reaction.py via server API.
- */
-async function heliosBuildReaction(rxData) {
-  try {
-    const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 15000);
-    const r = await fetch('/api/build_reaction', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(rxData),
-      signal: ctrl.signal
-    });
-    clearTimeout(timeout);
-    return await r.json();
-  } catch(e) {
-    return { ok: false, error: String(e) };
   }
 }
 

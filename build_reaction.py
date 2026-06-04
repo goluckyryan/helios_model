@@ -23,18 +23,6 @@ M_e   = 0.510998950 # MeV/c^2 (electron mass)
 M_p   = 938.272046  # MeV/c^2
 M_n   = 939.565379  # MeV/c^2
 
-def find_mass_table():
-    candidates = [
-        os.path.join(os.path.dirname(__file__), 'mass20.txt'),
-        os.path.join(os.path.dirname(__file__), 'mass16.txt'),
-        os.path.expanduser('~/digios/analysis/Cleopatra/mass20.txt'),
-        os.path.expanduser('~/digios/analysis/Cleopatra/mass16.txt'),
-    ]
-    for p in candidates:
-        if os.path.exists(p):
-            return p
-    return None
-
 def parse_mass_table(path):
     """Parse AME mass table. Returns dict {(Z,A): mass_MeV} nuclear mass (no electrons)."""
     masses = {}
@@ -170,8 +158,8 @@ def compute_kinematics(reaction, masses):
         'Q':         Q,
         'beam_label':   f'{Aa}{sym_a}',
         'target_label': f'{At}{sym_t}',
-        'recoil_light_label': f'{Ab}{sym_b}',
-        'recoil_heavy_label': f'{AB}{sym_B}',
+        'light_label':  f'{Ab}{sym_b}',
+        'heavy_label':  f'{AB}{sym_B}',
         'reaction_str': reaction_str,
         'Ma': Ma, 'Mt': Mt, 'Mb': Mb, 'MB': MB,
     }
@@ -186,64 +174,4 @@ def compute_kinematics_from_state(rxn, masses):
         adapted['recoil_light_Z'] = adapted.pop('light_Z')
     return compute_kinematics(adapted, masses)
 
-def write_reaction_dat(result, path):
-    with open(path, 'w') as f:
-        f.write(f"{result['mass_b']:.4f}         //mass_b\n")
-        f.write(f"{int(result['charge_b'])}                //charge_b\n")
-        f.write(f"{result['betaCM']:.8f}       //betaCM\n")
-        f.write(f"{result['Ecm']:.4f}       //Ecm\n")
-        f.write(f"{result['mass_B']:.4f}       //mass_B\n")
-        f.write(f"{int(result['charge_B'])}                //charge_B\n")
-        f.write(f"{result['alpha']:.4f}       //alpha=slope/betaRect\n")
-    print(f"  Written: {path}")
-
-if __name__ == '__main__':
-    # Locate files
-    reaction_json = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), 'helios_reaction.json')
-    mass_table_arg = sys.argv[2] if len(sys.argv) > 2 else None
-
-    mass_path = mass_table_arg or find_mass_table()
-    if not mass_path:
-        print("ERROR: No mass table found. Place mass20.txt in the helios_model folder.")
-        sys.exit(1)
-
-    if not os.path.exists(reaction_json):
-        print(f"ERROR: {reaction_json} not found.")
-        sys.exit(1)
-
-    print(f"Mass table: {mass_path}")
-    print(f"Reaction:   {reaction_json}")
-
-    masses = parse_mass_table(mass_path)
-    print(f"Loaded {len(masses)} nuclides from mass table.")
-
-    with open(reaction_json) as f:
-        reaction = json.load(f)
-
-    result = compute_kinematics(reaction, masses)
-
-    # Update helios_reaction.json with computed values
-    reaction.update({
-        'mass_b':    result['mass_b'],
-        'charge_b':  result['charge_b'],
-        'betaCM':    result['betaCM'],
-        'Ecm':       result['Ecm'],
-        'mass_B':    result['mass_B'],
-        'charge_B':  result['charge_B'],
-        'Ma':        result['Ma'],
-        'Mt':        result['Mt'],
-        'Q':         result['Q'],
-        'beam_label':   result['beam_label'],
-        'target_label': result['target_label'],
-        'recoil_light_label': result['recoil_light_label'],
-        'recoil_heavy_label': result['recoil_heavy_label'],
-        'reaction_str': result['reaction_str'],
-    })
-    with open(reaction_json, 'w') as f:
-        json.dump(reaction, f, indent=2)
-    print(f"  Updated: {reaction_json}")
-
-    # Write reaction.dat in same folder as reaction_json
-    dat_path = os.path.join(os.path.dirname(reaction_json), 'reaction.dat')
-    write_reaction_dat(result, dat_path)
-    print("\nDone.")
+# write_reaction_dat() and CLI __main__ removed: viewer/server.py computes kinematics in-memory

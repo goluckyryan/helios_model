@@ -5,7 +5,7 @@ Single source of runtime state: helios_state.json
 helios_config.json is read-only (element symbols, SS presets).
 """
 
-import http.server, json, math, os, socketserver, subprocess, sys, threading, urllib.request, urllib.error
+import http.server, json, math, os, socket, socketserver, subprocess, sys, threading, urllib.request, urllib.error
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,8 +21,6 @@ STATE_JSON       = os.path.join(ROOT, 'helios_state.json')
 CONFIG_JSON      = os.path.join(ROOT, 'helios_config.json')
 MCP_JSON         = os.path.join(ROOT, 'mcp.json')
 DEFAULT_NDS_URL  = 'http://192.168.203.75:65432/sse'
-BUILD_REACTION_PY = os.path.join(ROOT, 'build_reaction.py')
-BUILD_GEO_PY     = os.path.join(ROOT, 'build_geometry.py')
 
 DIGIOS_WORKING   = os.path.expanduser('~/digios/analysis/working')
 DETECTOR_GEO     = os.path.join(DIGIOS_WORKING, 'detectorGeo.txt')
@@ -34,6 +32,7 @@ GEN_INFILE_PY    = os.path.join(ROOT, 'gen_infile.py')
 _MASS_CACHE = None
 _MASS_LOCK  = threading.Lock()
 _MASS_PATH  = os.path.join(ROOT, 'mass20.txt')
+_STATE_LOCK = threading.Lock()  # serialize helios_state.json reads/writes
 
 def _get_masses():
     global _MASS_CACHE
@@ -51,64 +50,77 @@ def _get_masses():
 # ── helios_config.json (read-only, cached) ────────────────────────────────────
 _CONFIG_CACHE = None
 def _get_config():
+    """Read helios_config.json (committed to repo). Required file — raise if missing."""
     global _CONFIG_CACHE
     if _CONFIG_CACHE is not None:
         return _CONFIG_CACHE
-    if os.path.exists(CONFIG_JSON):
-        with open(CONFIG_JSON) as f:
-            _CONFIG_CACHE = json.load(f)
-    else:
-        _CONFIG_CACHE = {'element_symbols': ELEMENT_SYMBOLS, 'shorthands': {}, 'spectrometers': {}}
+    if not os.path.exists(CONFIG_JSON):
+        raise FileNotFoundError(f'{CONFIG_JSON} missing — should be in the repo')
+    with open(CONFIG_JSON) as f:
+        _CONFIG_CACHE = json.load(f)
     return _CONFIG_CACHE
 
 # ── State management ──────────────────────────────────────────────────────────
 
 def _default_state():
-    """Return default state using HELIOS preset from config."""
+    """Return default state from helios_config.json -> defaults (required)."""
     cfg = _get_config()
-    preset = cfg.get('spectrometers', {}).get('HELIOS', {})
+    d   = cfg['defaults']  # required: helios_config.json is in the repo
+    g   = d['geometry']
+    r   = d['reaction']
     return {
         'config_source': 'manual',
-        'ss_type': 'HELIOS',
+        'ss_type': d.get('ss_type', 'HELIOS'),
         'geometry': {
-            'firstPos':    preset.get('firstPos',   -100.0),
-            'recoilPos':   preset.get('recoilPos',   350.0),
-            'Bfield':      preset.get('Bfield',       -2.85),
-            'recoilInner': preset.get('recoilInner',   10.0),
-            'recoilOuter': preset.get('recoilOuter',   40.2),
+            'firstPos':    float(g['firstPos']),
+            'recoilPos':   float(g['recoilPos']),
+            'Bfield':      float(g['Bfield']),
+            'recoilInner': float(g['recoilInner']),
+            'recoilOuter': float(g['recoilOuter']),
         },
         'reaction': {
-            'beam_A': 32, 'beam_Z': 14,
-            'target_A': 2, 'target_Z': 1,
-            'light_A': 1,  'light_Z': 1,
-            'beam_energy_MeVu': 8.8,
+            'beam_A':           int(r['beam_A']),
+            'beam_Z':           int(r['beam_Z']),
+            'target_A':         int(r['target_A']),
+            'target_Z':         int(r['target_Z']),
+            'light_A':          int(r['light_A']),
+            'light_Z':          int(r['light_Z']),
+            'beam_energy_MeVu': float(r['beam_energy_MeVu']),
         },
         'computed': {},
     }
 
 def read_state():
-    """Read helios_state.json, return dict. Returns default if missing/corrupt."""
-    if os.path.exists(STATE_JSON):
-        try:
-            with open(STATE_JSON) as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return _default_state()
+    """Read helios_state.json (locked). Returns default if missing/corrupt (logged)."""
+    with _STATE_LOCK:
+        if os.path.exists(STATE_JSON):
+            try:
+                with open(STATE_JSON) as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f'[server] WARNING: {STATE_JSON} unreadable ({e}); using defaults')
+        return _default_state()
 
 def write_state(state):
-    with open(STATE_JSON, 'w') as f:
-        json.dump(state, f, indent=2)
+    """Atomic write of helios_state.json (locked, tmp+rename)."""
+    tmp = STATE_JSON + '.tmp'
+    with _STATE_LOCK:
+        with open(tmp, 'w') as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp, STATE_JSON)
 
 def recompute_state(state):
     """Fill state['computed'] from reaction + ss_type + geometry. Returns updated state."""
-    cfg    = _get_config()
-    ss     = state.get('ss_type', 'HELIOS')
-    geo    = state.get('geometry', {})
-    rxn    = state.get('reaction', {})
-    preset = cfg.get('spectrometers', {}).get(ss, list(cfg.get('spectrometers', {}).values() or [{}])[0] if cfg.get('spectrometers') else {})
+    cfg     = _get_config()
+    presets = cfg['spectrometers']  # required key in helios_config.json
+    ss      = state.get('ss_type', 'HELIOS')
+    geo     = state.get('geometry', {})
+    rxn     = state.get('reaction', {})
+    if ss not in presets:
+        raise KeyError(f'ss_type {ss!r} not in helios_config.json spectrometers')
+    preset = presets[ss]
 
-    fp = geo.get('firstPos', preset.get('firstPos', -100.0))
+    fp = geo.get('firstPos', preset['firstPos'])
 
     # Generate detectors from preset + firstPos
     dets, z_min, z_max = _make_detectors(preset, fp)
@@ -131,7 +143,12 @@ def recompute_state(state):
     return state
 
 def _make_detectors(preset, first_pos):
-    """Generate detector array from SS preset + firstPos. Returns (dets, zMin, zMax)."""
+    """Generate detector array from SS preset + firstPos. Returns (dets, zMin, zMax).
+
+    NOTE: posOffsets comes from helios_config.json SS preset only, NEVER from state.geometry.
+    To change the array layout, edit the preset in helios_config.json and restart.
+    state.geometry only carries the user-tunable parameters (firstPos, recoilPos, Bfield).
+    """
     offsets = preset.get('posOffsets', [0.0])
     n_det   = len(offsets)
     m_det   = int(preset.get('mDet', 4))
@@ -156,7 +173,7 @@ def _make_detectors(preset, first_pos):
                 'z_near': z_near, 'z_center': z_ctr, 'z': z_ctr,
                 'x': round(perp * math.cos(phi), 4),
                 'y': round(perp * math.sin(phi), 4),
-                'length': length, 'width': width,
+                'detLen': length, 'detWidth': width,
             })
 
     new_id = 0
@@ -171,103 +188,82 @@ def _make_detectors(preset, first_pos):
     z_max = round(max(znears) + (length if fp > 0 else 0), 4)
     return dets, z_min, z_max
 
-def _state_to_geo_json(state):
-    """Build a helios_geometry.json-compatible dict from state (for 3D viewer)."""
-    cfg    = _get_config()
-    ss     = state.get('ss_type', 'HELIOS')
-    geo    = state.get('geometry', {})
-    comp   = state.get('computed', {})
-    preset = cfg.get('spectrometers', {}).get(ss, {})
+# ── Digios loader (single source for both startup refresh and /api/config) ────────
 
-    return {
-        'config_source': state.get('config_source', 'manual'),
-        'ss_type':       ss,
-        'Bfield':        geo.get('Bfield',      preset.get('Bfield',      -2.85)),
-        'bore':          preset.get('bore',       462.5),
-        'perpDist':      preset.get('perpDist',   11.5),
-        'width':         preset.get('detWidth',   10.0),
-        'length':        preset.get('detLen',     50.0),
-        'detLen':        preset.get('detLen',     50.0),
-        'detGap':        preset.get('detGap',     5.0),
-        'recoilPos':     geo.get('recoilPos',    preset.get('recoilPos',   350.0)),
-        'recoilInner':   geo.get('recoilInner',  preset.get('recoilInner', 10.0)),
-        'recoilOuter':   geo.get('recoilOuter',  preset.get('recoilOuter', 40.2)),
-        'firstPos':      geo.get('firstPos',     preset.get('firstPos',   -100.0)),
-        'facing':        preset.get('facing',    'Out'),
-        'nDet':          len(preset.get('posOffsets', [])),
-        'mDet':          preset.get('mDet',      4),
-        'zMin':          comp.get('zMin',         -394.5),
-        'zMax':          comp.get('zMax',         -100.0),
-        'detectors':     comp.get('detectors',    []),
-    }
+def _load_state_from_digios():
+    """Build a fully-computed state dict from digios files.
 
-# ── Startup: ensure state exists ──────────────────────────────────────────────
+    Returns (state, extras, None) on success or (None, None, error_str) on failure.
+    `extras` is {'detGeo': dg, 'reactionConfig': rc} for callers that want the raw parses.
+    Defaults for missing fields fall back to helios_config.json -> "defaults".
+    """
+    from build_geometry import parse_detgeo, parse_reaction_config
+    if not os.path.exists(DETECTOR_GEO):
+        return None, None, f'detectorGeo.txt not found at {DETECTOR_GEO}'
+    if not os.path.exists(REACTION_CFG):
+        return None, None, f'reactionConfig.txt not found at {REACTION_CFG}'
+    try:
+        dg  = parse_detgeo(DETECTOR_GEO)
+        rc  = parse_reaction_config(REACTION_CFG)
+        cfg = _get_config()
+        gdef = cfg['defaults']['geometry']
+        rdef = cfg['defaults']['reaction']
+        # Pick SS type by mDet match against presets
+        m  = int(dg.get('mDet', 4))
+        ss = next((k for k, v in cfg['spectrometers'].items()
+                   if v.get('mDet') == m), cfg['defaults'].get('ss_type', 'HELIOS'))
+        state = {
+            'config_source': 'digios',
+            'ss_type': ss,
+            'geometry': {
+                'firstPos':    float(dg.get('firstPos',    gdef['firstPos'])),
+                'recoilPos':   float(dg.get('recoilPos',   gdef['recoilPos'])),
+                'Bfield':      float(dg.get('Bfield',      gdef['Bfield'])),
+                'recoilInner': float(dg.get('recoilInner', gdef['recoilInner'])),
+                'recoilOuter': float(dg.get('recoilOuter', gdef['recoilOuter'])),
+            },
+            'reaction': {
+                'beam_A':           int(rc.get('beam_A',           rdef['beam_A'])),
+                'beam_Z':           int(rc.get('beam_Z',           rdef['beam_Z'])),
+                'target_A':         int(rc.get('target_A',         rdef['target_A'])),
+                'target_Z':         int(rc.get('target_Z',         rdef['target_Z'])),
+                'light_A':          int(rc.get('recoil_light_A',   rdef['light_A'])),
+                'light_Z':          int(rc.get('recoil_light_Z',   rdef['light_Z'])),
+                'beam_energy_MeVu': float(rc.get('beam_energy_MeVu', rdef['beam_energy_MeVu'])),
+            },
+            'computed': {},
+        }
+        recompute_state(state)
+        return state, {'detGeo': dg, 'reactionConfig': rc}, None
+    except Exception as e:
+        return None, None, str(e)
+
+
+# ── Startup: ensure state exists ─────────────────────────────
 
 def ensure_state():
     """On startup: create helios_state.json if missing, or refresh if config_source=digios."""
-
-    def _try_load_digios():
-        """Try to build state from digios files. Returns state dict or None."""
-        from build_geometry import parse_detgeo, parse_reaction_config
-        if not os.path.exists(DETECTOR_GEO) or not os.path.exists(REACTION_CFG):
-            return None
-        try:
-            dg = parse_detgeo(DETECTOR_GEO)
-            rc = parse_reaction_config(REACTION_CFG)
-            cfg = _get_config()
-            # Identify SS type by mDet
-            m = int(dg.get('mDet', 4))
-            ss = next((k for k,v in cfg.get('spectrometers',{}).items()
-                       if v.get('mDet') == m), 'HELIOS')
-            state = {
-                'config_source': 'digios',
-                'ss_type': ss,
-                'geometry': {
-                    'firstPos':    float(dg.get('firstPos',  -100.0)),
-                    'recoilPos':   float(dg.get('recoilPos',  350.0)),
-                    'Bfield':      float(dg.get('Bfield',     -2.85)),
-                    'recoilInner': float(dg.get('recoilInner', 10.0)),
-                    'recoilOuter': float(dg.get('recoilOuter', 40.2)),
-                },
-                'reaction': {
-                    'beam_A':         int(rc.get('beam_A',   32)),
-                    'beam_Z':         int(rc.get('beam_Z',   14)),
-                    'target_A':       int(rc.get('target_A',  2)),
-                    'target_Z':       int(rc.get('target_Z',  1)),
-                    'light_A':        int(rc.get('recoil_light_A', 1)),
-                    'light_Z':        int(rc.get('recoil_light_Z', 1)),
-                    'beam_energy_MeVu': float(rc.get('beam_energy_MeVu', 8.8)),
-                },
-                'computed': {},
-            }
-            recompute_state(state)
-            return state
-        except Exception as e:
-            print(f'[server] digios load failed: {e}')
-            return None
-
     if not os.path.exists(STATE_JSON):
         print('[server] helios_state.json missing — creating...')
-        state = _try_load_digios()
+        state, _extras, err = _load_state_from_digios()
         if state is None:
-            print('[server] digios unavailable — writing defaults (manual)')
+            print(f'[server] digios unavailable ({err}) — writing defaults (manual)')
             state = _default_state()
             recompute_state(state)
         write_state(state)
         print(f'[server] state created: ss={state["ss_type"]} source={state["config_source"]}')
         return
 
-    # File exists — check config_source
     state = read_state()
     src = state.get('config_source', 'manual')
     if src == 'digios':
         print('[server] config_source=digios — refreshing from digios...')
-        fresh = _try_load_digios()
+        fresh, _extras, err = _load_state_from_digios()
         if fresh:
             write_state(fresh)
             print('[server] state refreshed from digios')
         else:
-            print('[server] digios unavailable — keeping existing state')
+            print(f'[server] digios unavailable ({err}) — keeping existing state')
     else:
         # manual — recompute computed section in case code changed
         recompute_state(state)
@@ -406,76 +402,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif path == '/api/state':
             self.send_json({'ok': True, 'state': read_state()})
 
-        # ── Geometry JSON (derived from state, for 3D viewer + backward compat) ─
-        elif path == '/helios_geometry.json':
-            state = read_state()
-            self.send_json(_state_to_geo_json(state))
-
-        # ── Reaction config (derived from state, for kinematics compat) ────────
-        elif path == '/api/reaction_config':
-            state = read_state()
-            rxn   = state.get('reaction', {})
-            comp  = state.get('computed', {})
-            result = {
-                **rxn,
-                **{k: comp[k] for k in comp if k != 'detectors'},
-                'config_source': state.get('config_source', 'manual'),
-                'ss_type':       state.get('ss_type', 'HELIOS'),
-                # legacy keys for kinematics.html compatibility
-                'recoil_light_A': rxn.get('light_A', 1),
-                'recoil_light_Z': rxn.get('light_Z', 1),
-                'recoil_light_label': comp.get('recoil_light_label', ''),
-                'recoil_heavy_label': comp.get('recoil_heavy_label', ''),
-            }
-            self.send_json({'ok': True, 'reaction': result})
-
-        # ── Load from digios (explicit user action) ────────────────────────────
+        # ── Load from digios (explicit user action) ───────────────────────
         elif path == '/api/config':
-            from build_geometry import parse_detgeo, parse_reaction_config
-            result = {'ok': True, 'errors': []}
-            try:
-                if not os.path.exists(DETECTOR_GEO):
-                    raise FileNotFoundError(f'detectorGeo.txt not found at {DETECTOR_GEO}')
-                if not os.path.exists(REACTION_CFG):
-                    raise FileNotFoundError(f'reactionConfig.txt not found at {REACTION_CFG}')
-
-                dg = parse_detgeo(DETECTOR_GEO)
-                rc = parse_reaction_config(REACTION_CFG)
-                cfg = _get_config()
-                m = int(dg.get('mDet', 4))
-                ss = next((k for k,v in cfg.get('spectrometers',{}).items()
-                           if v.get('mDet') == m), 'HELIOS')
-
-                state = {
-                    'config_source': 'digios',
-                    'ss_type': ss,
-                    'geometry': {
-                        'firstPos':    float(dg.get('firstPos',  -100.0)),
-                        'recoilPos':   float(dg.get('recoilPos',  350.0)),
-                        'Bfield':      float(dg.get('Bfield',     -2.85)),
-                        'recoilInner': float(dg.get('recoilInner', 10.0)),
-                        'recoilOuter': float(dg.get('recoilOuter', 40.2)),
-                    },
-                    'reaction': {
-                        'beam_A':           int(rc.get('beam_A',   32)),
-                        'beam_Z':           int(rc.get('beam_Z',   14)),
-                        'target_A':         int(rc.get('target_A',  2)),
-                        'target_Z':         int(rc.get('target_Z',  1)),
-                        'light_A':          int(rc.get('recoil_light_A', 1)),
-                        'light_Z':          int(rc.get('recoil_light_Z', 1)),
-                        'beam_energy_MeVu': float(rc.get('beam_energy_MeVu', 8.8)),
-                    },
-                    'computed': {},
-                }
-                recompute_state(state)
+            state, extras, err = _load_state_from_digios()
+            if state is None:
+                self.send_json({'ok': False, 'error': err, 'errors': [err]})
+            else:
                 write_state(state)
-                result['state']        = state
-                result['detGeo']       = dg
-                result['reactionConfig'] = rc
-            except Exception as e:
-                result['ok'] = False
-                result['error'] = str(e)
-            self.send_json(result)
+                self.send_json({'ok': True, 'state': state,
+                                 'detGeo': extras['detGeo'],
+                                 'reactionConfig': extras['reactionConfig'],
+                                 'errors': []})
 
         # ── Capabilities ──────────────────────────────────────────────────────
         elif path == '/api/capabilities':
@@ -568,45 +505,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 # Merge incoming fields
                 if 'ss_type'       in data: state['ss_type']       = data['ss_type']
                 if 'config_source' in data: state['config_source'] = data['config_source']
-                if 'geometry'      in data: state['geometry'].update(data['geometry'])
-                if 'reaction'      in data: state['reaction'].update(data['reaction'])
+                if 'geometry'      in data: state.setdefault('geometry', {}).update(data['geometry'])
+                if 'reaction'      in data: state.setdefault('reaction', {}).update(data['reaction'])
                 recompute_state(state)
                 write_state(state)
                 self.send_json({'ok': True, 'state': state})
-            except Exception as e:
-                self.send_json({'ok': False, 'error': str(e)}, 500)
-
-        # ── Build reaction (legacy compat — used by Ptolemy panel) ────────────
-        elif path == '/api/build_reaction':
-            try:
-                data   = json.loads(body)
-                state  = read_state()
-                # Accept both old (recoil_light_A) and new (light_A) keys
-                rxn = {
-                    'beam_A':           int(data.get('beam_A',   state['reaction'].get('beam_A',   32))),
-                    'beam_Z':           int(data.get('beam_Z',   state['reaction'].get('beam_Z',   14))),
-                    'target_A':         int(data.get('target_A', state['reaction'].get('target_A',  2))),
-                    'target_Z':         int(data.get('target_Z', state['reaction'].get('target_Z',  1))),
-                    'light_A':          int(data.get('light_A',  data.get('recoil_light_A',
-                                            state['reaction'].get('light_A', 1)))),
-                    'light_Z':          int(data.get('light_Z',  data.get('recoil_light_Z',
-                                            state['reaction'].get('light_Z', 1)))),
-                    'beam_energy_MeVu': float(data.get('beam_energy_MeVu',
-                                            state['reaction'].get('beam_energy_MeVu', 8.8))),
-                }
-                if 'config_source' in data: state['config_source'] = data['config_source']
-                if 'ss_type'       in data: state['ss_type']       = data['ss_type']
-                state['reaction'] = rxn
-                recompute_state(state)
-                write_state(state)
-                comp = state['computed']
-                # Return in legacy format expected by kinematics.html
-                result = {**rxn, **{k:v for k,v in comp.items() if k!='detectors'},
-                          'config_source': state['config_source'],
-                          'recoil_light_A': rxn['light_A'], 'recoil_light_Z': rxn['light_Z'],
-                          'recoil_light_label': comp.get('recoil_light_label',''),
-                          'recoil_heavy_label': comp.get('recoil_heavy_label',''),}
-                self.send_json({'ok': True, 'reaction': result})
             except Exception as e:
                 self.send_json({'ok': False, 'error': str(e)}, 500)
 
@@ -751,13 +654,34 @@ class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
 
 
+def _detect_host_ip():
+    """Best-effort: find the IP this host uses to reach the local network.
+    Falls back to gethostbyname(hostname) and finally None."""
+    try:
+        # Trick: UDP socket to a public address — no packets sent, but kernel
+        # populates the source IP that would be used for the route.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(('8.8.8.8', 80))
+            return s.getsockname()[0]
+    except Exception:
+        pass
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except Exception:
+        return None
+
 if __name__ == '__main__':
     os.chdir(DIR)
     _get_masses()       # warm up mass cache
     _get_config()       # warm up config cache
     ensure_state()      # create/refresh helios_state.json
     with ThreadedTCPServer(('', PORT), Handler) as httpd:
-        print(f'HELIOS 3D viewer: http://localhost:{PORT}')
-        print(f'From network:     http://192.168.1.101:{PORT}')
-        print(f'Config source:    {DIGIOS_WORKING}')
+        print(f'HELIOS 3D viewer: http://localhost:{PORT}', flush=True)
+        host_ip = _detect_host_ip()
+        if host_ip and host_ip != '127.0.0.1':
+            print(f'From network:     http://{host_ip}:{PORT}', flush=True)
+        if os.path.exists(DIGIOS_WORKING):
+            print(f'Digios path:      {DIGIOS_WORKING}', flush=True)
+        else:
+            print(f'Digios path:      not found ({DIGIOS_WORKING})', flush=True)
         httpd.serve_forever()

@@ -1,5 +1,24 @@
 {
-  "_comment": "helios_config.json \u2014 single source of truth for element symbols, nuclide shorthands, and spectrometer geometry presets.",
+  "_comment": "helios_config.json \u2014 element symbols, shorthands, SS presets, and fresh-clone defaults.",
+  "defaults": {
+    "ss_type": "HELIOS",
+    "geometry": {
+      "firstPos": -100.0,
+      "recoilPos": 500.0,
+      "Bfield": -2.85,
+      "recoilInner": 10.0,
+      "recoilOuter": 40.2
+    },
+    "reaction": {
+      "beam_A": 25,
+      "beam_Z": 9,
+      "target_A": 2,
+      "target_Z": 1,
+      "light_A": 1,
+      "light_Z": 1,
+      "beam_energy_MeVu": 10.0
+    }
+  },
   "element_symbols": [
     "n",
     "H",

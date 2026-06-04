@@ -241,24 +241,24 @@ function hideLoading() {
 const C = 299.792458; // mm/ns
 
 // ── FALLBACK SETTINGS ────────────────────────────────────────────────────────
-// Used when helios_geometry.json or helios_reaction.json cannot be loaded.
-// These are overwritten at startup by loadReactionJson() and fetch('helios_geometry.json').
-// Also overwritten by 'Load digios' and '⚙ Compute'.
+// Used only if /api/state fails to load on startup.
+// Normally overwritten by the startup fetch('/api/state'), 'Load digios', and '⚙ Compute'.
 // Update these if you want a different standalone default (e.g. a new experiment).
+// Must mirror helios_config.json -> defaults; only used if /api/state fails on startup.
 const FALLBACK = {
-  // Geometry (mirrors detectorGeo.txt defaults)
-  firstPos:   -121,    // mm, array near edge (upstream)
-  recoilPos:  1000,    // mm, RDT position
-  Bfield:     -3.0,    // T, magnetic field
-  bore:        462.5,  // mm
-  // Reaction kinematics (proton from d+beam reaction)
-  mass_b:    938.2720,    // MeV/c^2  light recoil
+  // Geometry (helios_config.json defaults: 25F+d, HELIOS preset)
+  firstPos:   -100,    // mm, array near edge (upstream)
+  recoilPos:   500,    // mm, RDT position
+  Bfield:    -2.85,    // T, magnetic field
+  bore:       462.5,   // mm
+  // Reaction kinematics: 25F(d,p)26F at 10 MeV/u (approx, only used as fallback)
+  mass_b:    938.2720,   // MeV/c^2  light recoil (proton)
   charge_b:  1,
-  betaCM:    0.14608743,
-  Ecm:       29810.5622,  // MeV, total CM energy
-  mass_B:    28846.2128,  // MeV/c^2  heavy recoil
-  charge_B:  14,
-  alpha:     0.1360,
+  betaCM:    0.04125,
+  Ecm:       25132.0,    // MeV, approximate total CM energy
+  mass_B:    24209.0,    // MeV/c^2  heavy recoil (approx 26F)
+  charge_B:  9,
+  alpha:     0.04125,
 };
 // REACTION points to FALLBACK — same object, readable alias for physics code
 const REACTION = FALLBACK;
@@ -496,7 +496,7 @@ function updateColors() {
   updateLegend();
 }
 
-function autoPositionMagnet(geo) {
+function autoPositionMagnet(geo, moveCamera = true) {
   // Magnet center = midpoint of the full span: target(z=0), RDT, and array extents
   // magnet_center = ( min(0, RDT, arrayMin) + max(0, RDT, arrayMax) ) / 2
   const target = 0;  // target always at z=0
@@ -511,8 +511,8 @@ function autoPositionMagnet(geo) {
   document.getElementById('target-z-val').textContent = (mz >= 0 ? '+' : '') + mz + ' mm';
   if (movableGroup) movableGroup.position.z = mz;
   buildBeamArrow();
-  // Reposition camera to array center
-  if (typeof controls !== 'undefined' && typeof camera !== 'undefined') {
+  // Reposition camera to array center (skipped when moveCamera=false, e.g. user clicked Reposition)
+  if (moveCamera && typeof controls !== 'undefined' && typeof camera !== 'undefined') {
     const fp = geo.firstPos || 0;
     const zMin = geo.zMin !== undefined ? geo.zMin : fp;
     const zMax = geo.zMax !== undefined ? geo.zMax : fp;
@@ -657,7 +657,7 @@ function buildScene() {
     //   box: dx=width (tangential), dy=thickness (radial out), dz=length (beam axis)
     //   center at (detRadialCenter, 0, z_center)
     // Then rotate a pivot group around Z by phi to place any row.
-    const geo = new THREE.BoxGeometry(detThickness, det.width, det.length);
+    const geo = new THREE.BoxGeometry(detThickness, det.detWidth, det.detLen);
     const mat = new THREE.MeshPhongMaterial({ color: getDetColor(det), transparent: false, opacity: 1.0, shininess: 60, depthWrite: true });
     const mesh = new THREE.Mesh(geo, mat);
     // Canonical +X position: face points in +Y (radially out), centered on beam axis offset
@@ -816,7 +816,7 @@ function buildScene() {
   updateLegend();
   document.getElementById('geo-info').innerHTML =
     `B=${g.Bfield}T | bore=${g.bore}mm<br>${g.nDet}×${g.mDet} dets @ r=${g.perpDist}mm<br>` +
-    `det ${g.length}×${g.width}mm | ${g.facing}-facing<br>Z: ${g.zMin.toFixed(0)}→${g.zMax.toFixed(0)}mm`;
+    `det ${g.detLen}×${g.detWidth}mm | ${g.facing}-facing<br>Z: ${g.zMin.toFixed(0)}→${g.zMax.toFixed(0)}mm`;
 }
 
 function updateLegend() {
@@ -930,10 +930,10 @@ function checkTubeHit(pt, geo) {
 // Check if a helix point hits a silicon detector
 function checkSiHit(pt, geo) {
   const r = Math.sqrt(pt.x*pt.x + pt.y*pt.y);
-  if (Math.abs(r - geo.perpDist) > geo.width * 0.6) return null;
+  if (Math.abs(r - geo.perpDist) > geo.detWidth * 0.6) return null;
   for (const det of geo.detectors) {
     const zNear = det.z_near;
-    const zFar  = (geo.firstPos < 0) ? zNear - geo.length : zNear + geo.length;
+    const zFar  = (geo.firstPos < 0) ? zNear - geo.detLen : zNear + geo.detLen;
     const zMin  = Math.min(zNear, zFar);
     const zMax  = Math.max(zNear, zFar);
     if (pt.z < zMin || pt.z > zMax) continue;
@@ -943,7 +943,7 @@ function checkSiHit(pt, geo) {
     let dPhi = Math.abs(ptPhi - detPhi) % 360;
     if (dPhi > 180) dPhi = 360 - dPhi;
     // half-width in degrees at radius perpDist
-    const halfWidthDeg = (geo.width / 2) / geo.perpDist * 180 / Math.PI;
+    const halfWidthDeg = (geo.detWidth / 2) / geo.perpDist * 180 / Math.PI;
     if (dPhi < halfWidthDeg + 5) return det; // +5 deg tolerance
   }
   return null;
@@ -1381,48 +1381,37 @@ function resolveSymbol(role) {
 ['rx-beam-A','rx-beam-Z'].forEach(id => { const el=document.getElementById(id); if(el) el.addEventListener('input', buildBeamArrow); });
 ['rx-tgt-A','rx-tgt-Z'].forEach(id => { const el=document.getElementById(id); if(el) el.addEventListener('input', buildTarget); });
 
-// Reaction panel — load from helios_reaction.json on startup
-async function loadReactionJson() {
-  try {
-    const r = await fetch('/api/reaction_config');
-    const d = await r.json();
-    if (d.ok && d.reaction) applyReactionConfig(d.reaction);
-  } catch(e) { /* standalone mode — no server or file */ }
-}
-
-const azToSym = heliosNuclideName;
-function _azToSym_unused(A, Z) {
-  return A + (ELEMENT_SYMBOLS[Z] || ('Z'+Z));
-}
-function applyReactionConfig(rx) {
-  if (rx.beam_A)         document.getElementById('rx-beam-A').value = rx.beam_A;
-  if (rx.beam_Z)         document.getElementById('rx-beam-Z').value = rx.beam_Z;
-  if (rx.target_A)       document.getElementById('rx-tgt-A').value  = rx.target_A;
-  if (rx.target_Z)       document.getElementById('rx-tgt-Z').value  = rx.target_Z;
-  if (rx.recoil_light_A) document.getElementById('rx-rec-A').value  = rx.recoil_light_A;
-  if (rx.recoil_light_Z) document.getElementById('rx-rec-Z').value  = rx.recoil_light_Z;
-  // Also update symbol text fields
-  if (rx.beam_label)         { const el=document.getElementById('rx-beam-sym'); if(el) el.value=rx.beam_label; }
-  else if (rx.beam_A && rx.beam_Z) { const el=document.getElementById('rx-beam-sym'); if(el) el.value=azToSym(rx.beam_A,rx.beam_Z); }
-  if (rx.target_label)       { const el=document.getElementById('rx-tgt-sym'); if(el) el.value=rx.target_label; }
-  else if (rx.target_A && rx.target_Z) { const el=document.getElementById('rx-tgt-sym'); if(el) el.value=azToSym(rx.target_A,rx.target_Z); }
-  if (rx.recoil_light_label) { const el=document.getElementById('rx-rec-sym'); if(el) el.value=rx.recoil_light_label; }
-  else if (rx.recoil_light_A && rx.recoil_light_Z) { const el=document.getElementById('rx-rec-sym'); if(el) el.value=azToSym(rx.recoil_light_A,rx.recoil_light_Z); }
-  if (rx.beam_energy_MeVu) document.getElementById('rx-energy').value = rx.beam_energy_MeVu;
-  // Update kinematics
-  if (rx.mass_b)  REACTION.mass_b  = rx.mass_b;
-  if (rx.charge_b) REACTION.charge_b = rx.charge_b;
-  if (rx.betaCM)  REACTION.betaCM  = rx.betaCM;
-  if (rx.Ecm)     REACTION.Ecm     = rx.Ecm;
-  if (rx.mass_B)  REACTION.mass_B  = rx.mass_B;
-  if (rx.charge_B) REACTION.charge_B = rx.charge_B;
-  // Labels
+// Apply state.{reaction, computed} to reaction panel + REACTION kinematics object.
+// Consumes helios_state.json directly — no shape adapter needed.
+function applyReactionState(state) {
+  const rxn  = (state && state.reaction)  || {};
+  const comp = (state && state.computed)  || {};
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+  // A/Z inputs (hidden)
+  setVal('rx-beam-A', rxn.beam_A);   setVal('rx-beam-Z', rxn.beam_Z);
+  setVal('rx-tgt-A',  rxn.target_A); setVal('rx-tgt-Z',  rxn.target_Z);
+  setVal('rx-rec-A',  rxn.light_A);  setVal('rx-rec-Z',  rxn.light_Z);
+  // Symbol text fields (prefer server-computed label)
+  setVal('rx-beam-sym', comp.beam_label         || (rxn.beam_A   != null ? heliosNuclideName(rxn.beam_A,   rxn.beam_Z)   : null));
+  setVal('rx-tgt-sym',  comp.target_label       || (rxn.target_A != null ? heliosNuclideName(rxn.target_A, rxn.target_Z) : null));
+  setVal('rx-rec-sym',  comp.light_label || (rxn.light_A != null ? heliosNuclideName(rxn.light_A, rxn.light_Z) : null));
+  setVal('rx-energy',   rxn.beam_energy_MeVu);
+  // Kinematics for trajectory computation
+  if (comp.mass_b   != null) REACTION.mass_b   = comp.mass_b;
+  if (comp.charge_b != null) REACTION.charge_b = comp.charge_b;
+  if (comp.betaCM   != null) REACTION.betaCM   = comp.betaCM;
+  if (comp.Ecm      != null) REACTION.Ecm      = comp.Ecm;
+  if (comp.mass_B   != null) REACTION.mass_B   = comp.mass_B;
+  if (comp.charge_B != null) REACTION.charge_B = comp.charge_B;
   buildBeamArrow();
   buildTarget();
-  const rxStr = rx.reaction_str || `${rx.beam_label || '?'}+${rx.target_label || '?'}`;
-  document.getElementById('rx-status').textContent =
-    `${rxStr}  Q=${rx.Q !== undefined ? rx.Q.toFixed(3)+' MeV' : '?'}  betaCM=${rx.betaCM ? rx.betaCM.toFixed(5) : '?'}`;
-  document.getElementById('rx-status').style.color = '#3fb950';
+  const rxStr = comp.reaction_str || `${comp.beam_label || '?'}+${comp.target_label || '?'}`;
+  const st = document.getElementById('rx-status');
+  if (st) {
+    st.textContent = `${rxStr}  Q=${comp.Q !== undefined ? comp.Q.toFixed(3)+' MeV' : '?'}  ` +
+                     `betaCM=${comp.betaCM ? comp.betaCM.toFixed(5) : '?'}`;
+    st.style.color = '#3fb950';
+  }
   clearTracks();
 }
 
@@ -1430,6 +1419,10 @@ document.getElementById('rx-build-btn').addEventListener('click', async () => {
   const btn = document.getElementById('rx-build-btn');
   const status = document.getElementById('rx-status');
   btn.disabled = true; btn.textContent = '⟳ Computing...';
+  // Resolve current symbol inputs even if user did not press Enter
+  resolveSymbol('beam');
+  resolveSymbol('target');
+  resolveSymbol('recoil');
   // POST reaction to /api/state — server recomputes kinematics
   const payload = {
     config_source: 'manual',
@@ -1450,9 +1443,9 @@ document.getElementById('rx-build-btn').addEventListener('click', async () => {
     });
     const d = await r.json();
     if (d.ok) {
-      const rx = {...d.state.reaction, ...d.state.computed};
-      applyReactionConfig(rx);
-      status.textContent = 'Computed: ' + (rx.reaction_str || '') + '  Q=' + (rx.Q||0).toFixed(3) + ' MeV';
+      applyReactionState(d.state);
+      const comp = d.state.computed || {};
+      status.textContent = 'Computed: ' + (comp.reaction_str || '') + '  Q=' + (comp.Q||0).toFixed(3) + ' MeV';
       status.style.color = '#3fb950';
     } else {
       status.textContent = '⚠ ' + d.error;
@@ -1483,48 +1476,32 @@ document.getElementById('load-config-btn').addEventListener('click', async () =>
   const status = document.getElementById('config-status');
   btn.disabled = true; btn.textContent = '⟳ Loading...';
   try {
-    // Load from digios — /api/config reads detectorGeo + reactionConfig, saves + returns state
+    // /api/config reads digios files, writes helios_state.json, returns full state
     const resp = await fetch('/api/config');
     const d = await resp.json();
     if (!d.ok) throw new Error(d.error || 'Load digios failed');
-
     const st = d.state;
     if (!st) throw new Error('No state returned from /api/config');
 
+    const preset = (HELIOS_SS_PRESETS || {})[st.ss_type] || {};
+    GEO = _stateToGeo(st, preset);
+
+    // Sync geometry panel inputs from authoritative state
     const geo = st.geometry || {};
-    const rxn = st.reaction || {};
-    const comp = st.computed || {};
+    document.getElementById('array-pos').value  = geo.firstPos;
+    document.getElementById('rdt-pos').value    = geo.recoilPos;
+    document.getElementById('bfield').value     = geo.Bfield;
+    document.getElementById('bfield-val').value = parseFloat(geo.Bfield).toFixed(2);
 
-    // Update geometry panel
-    if (geo.firstPos  !== undefined) { document.getElementById('array-pos').value  = geo.firstPos;  }
-    if (geo.recoilPos !== undefined) { document.getElementById('rdt-pos').value    = geo.recoilPos; }
-    if (geo.Bfield    !== undefined) {
-      document.getElementById('bfield').value     = geo.Bfield;
-      document.getElementById('bfield-val').value = parseFloat(geo.Bfield).toFixed(2);
-      if (GEO) GEO.Bfield = geo.Bfield;
-    }
-
-    // Update reaction panel
-    if (rxn.beam_A)   document.getElementById('rx-beam-A').value = rxn.beam_A;
-    if (rxn.beam_Z)   document.getElementById('rx-beam-Z').value = rxn.beam_Z;
-    if (rxn.target_A) document.getElementById('rx-tgt-A').value  = rxn.target_A;
-    if (rxn.target_Z) document.getElementById('rx-tgt-Z').value  = rxn.target_Z;
-    if (rxn.light_A)  { document.getElementById('rx-rec-A').value = rxn.light_A; document.getElementById('rx-rec-Z').value = rxn.light_Z; }
-    if (rxn.beam_energy_MeVu) document.getElementById('rx-energy').value = rxn.beam_energy_MeVu;
-    const bsym = document.getElementById('rx-beam-sym');
-    const tsym = document.getElementById('rx-tgt-sym');
-    const rsym = document.getElementById('rx-rec-sym');
-    if (bsym && comp.beam_label)         bsym.value = comp.beam_label;
-    if (tsym && comp.target_label)       tsym.value = comp.target_label;
-    if (rsym && comp.recoil_light_label) rsym.value = comp.recoil_light_label;
-
-    // Apply kinematics + rebuild scene from new geometry
-    applyReactionConfig({...rxn, ...comp});
+    applyReactionState(st);
     buildScene();  // full rebuild with new detectors from state
 
     const errStr = (d.errors && d.errors.length) ? ' | ⚠ ' + d.errors.join(', ') : '';
     status.textContent = `Loaded: firstPos=${geo.firstPos}mm  B=${geo.Bfield}T${errStr}`;
     status.style.color = '#3fb950';
+  } catch(e) {
+    status.textContent = '✕ ' + e.message;
+    status.style.color = '#ff7b72';
   } finally {
     btn.disabled = false; btn.textContent = '↓ Load digios';
   }
@@ -1540,32 +1517,29 @@ async function applyGeometry() {
 }
 
 async function _doApplyGeometry(newFirstPos, newRDTPos, status, btn) {
-  // First rebuild helios_geometry.json with new positions
+  // POST new geometry to /api/state — server recomputes detectors and writes helios_state.json.
+  // We then adopt the server's recomputed state as the source of truth (no client-side drift).
   if (status) { status.textContent = 'Rebuilding geometry...'; status.style.color = '#8b949e'; }
+  let serverState = null;
   try {
     const r = await fetch('/api/state', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ config_source: 'manual', geometry: { firstPos: newFirstPos, recoilPos: newRDTPos, Bfield: GEO ? GEO.Bfield : -3 } })
+      body: JSON.stringify({ config_source: 'manual',
+                             geometry: { firstPos: newFirstPos, recoilPos: newRDTPos,
+                                         Bfield: GEO ? GEO.Bfield : FALLBACK.Bfield } })
     });
     const d = await r.json();
     if (!d.ok) { if(status){ status.textContent = 'Rebuild failed: ' + d.error; status.style.color = '#ff7b72'; } if(btn) btn.disabled=false; return; }
+    serverState = d.state;
   } catch(e) {
     if(status){ status.textContent = 'Rebuild error: ' + e.message; status.style.color = '#ff7b72'; } if(btn) btn.disabled=false; return;
   }
 
-  // Shift all scene objects in-place — no rebuild needed
+  // Adopt server-recomputed state (authoritative); shift scene objects in-place for smooth UX
   try {
     const delta = newFirstPos - GEO.firstPos;
-
-    // 1. Shift detector meshes
-    detMeshes.forEach(mesh => {
-      mesh.position.z += delta;
-    });
-
-    // 2. Shift entire support tube group (panels + wireframe) at once
+    detMeshes.forEach(mesh => { mesh.position.z += delta; });
     if (tubeGroup) tubeGroup.position.z += delta;
-
-    // 4. Move recoil ring
     if (recoilGroup) {
       recoilGroup.children.forEach(child => {
         if (child.geometry && child.geometry.type === 'RingGeometry') {
@@ -1574,17 +1548,21 @@ async function _doApplyGeometry(newFirstPos, newRDTPos, status, btn) {
       });
     }
 
-    // 5. Update GEO
-    GEO.detectors.forEach(d => { d.z_near += delta; d.z_center += delta; d.z += delta; });
-    GEO.firstPos = newFirstPos;
-    GEO.zMin += delta; GEO.zMax += delta;
-    GEO._tubeZMin = GEO.zMin; GEO._tubeZMax = GEO.zMax;
-    GEO.recoilPos = newRDTPos;
+    // Refresh GEO from server state (single source of truth)
+    if (serverState) {
+      const preset = (HELIOS_SS_PRESETS || {})[serverState.ss_type] || {};
+      GEO = _stateToGeo(serverState, preset);
+      GEO._tubeZMin = GEO.zMin; GEO._tubeZMax = GEO.zMax;
+    } else {
+      // Should not happen (return above on failure), but keep client consistent
+      GEO.detectors.forEach(d => { d.z_near += delta; d.z_center += delta; d.z += delta; });
+      GEO.firstPos = newFirstPos;
+      GEO.zMin += delta; GEO.zMax += delta;
+      GEO._tubeZMin = GEO.zMin; GEO._tubeZMax = GEO.zMax;
+      GEO.recoilPos = newRDTPos;
+    }
 
-    // 6. JSON on disk already updated above by /api/rebuild_geo
-
-    // 7. Auto-position magnet and camera
-    autoPositionMagnet(GEO);
+    autoPositionMagnet(GEO, false);  // magnet only, do not move camera
     clearTracks();
     status.textContent = `Repositioned: firstPos=${newFirstPos}mm  RDT=${newRDTPos}mm`;
     status.style.color = '#3fb950';
@@ -1601,39 +1579,65 @@ document.getElementById('apply-geo-btn').addEventListener('click', applyGeometry
 // ═══════════════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════════════
+// Build the GEO object consumed by the 3D scene from helios_state.json + SS preset.
+// helios_state.json carries geometry+computed; SS preset (helios_config.json) carries
+// fixed properties (bore, perpDist, detLen, etc.). Defaults here only fire if both are missing.
+function _stateToGeo(state, preset) {
+  const g    = state.geometry || {};
+  const comp = state.computed || {};
+  const p    = preset || {};
+  return {
+    config_source: state.config_source || 'manual',
+    ss_type:       state.ss_type      || 'HELIOS',
+    Bfield:        g.Bfield      ?? p.Bfield      ?? FALLBACK.Bfield,
+    bore:          p.bore        ?? FALLBACK.bore,
+    perpDist:      p.perpDist    ?? 11.5,
+    detWidth:      p.detWidth    ?? 10.0,
+    detLen:        p.detLen      ?? 50.0,
+    detGap:        p.detGap      ?? 5.0,
+    recoilPos:     g.recoilPos   ?? p.recoilPos   ?? FALLBACK.recoilPos,
+    recoilInner:   g.recoilInner ?? p.recoilInner ?? 10.0,
+    recoilOuter:   g.recoilOuter ?? p.recoilOuter ?? 40.2,
+    firstPos:      g.firstPos    ?? p.firstPos    ?? FALLBACK.firstPos,
+    facing:        p.facing      ?? 'Out',
+    nDet:          (p.posOffsets || []).length,
+    mDet:          p.mDet        ?? 4,
+    zMin:          comp.zMin     ?? (g.firstPos ?? FALLBACK.firstPos),
+    zMax:          comp.zMax     ?? (g.firstPos ?? FALLBACK.firstPos),
+    detectors:     comp.detectors || [],
+  };
+}
+
 animate();
-setLoadingProgress(80, 'Loading geometry...');
-fetch('helios_geometry.json')
+setLoadingProgress(80, 'Loading state...');
+// Single round-trip: fetch /api/state, build scene + reaction panel from one source
+heliosConfigReady
+  .then(() => fetch('/api/state'))
   .then(r => r.json())
-  .then(data => {
+  .then(d => {
+    if (!d.ok || !d.state) throw new Error(d.error || 'no state');
+    const state  = d.state;
+    const preset = (HELIOS_SS_PRESETS || {})[state.ss_type] || {};
     setLoadingProgress(95, 'Building scene...');
-    GEO = data;
-    // Ensure helios_config.json is loaded before building scene (needs ELEMENT_SYMBOLS)
-    heliosConfigReady.then(() => {
-      buildScene();
-      // Load reaction after scene is built so buildBeamArrow/buildTarget have full context.
-      loadReactionJson();
-      checkCapabilities();
-    });
-    // Sync geometry panel from loaded JSON
-    document.getElementById('bfield').value = data.Bfield;
-    document.getElementById('bfield-val').value = parseFloat(data.Bfield).toFixed(2);
-    if (data.firstPos !== undefined) {
-      document.getElementById('array-pos').value = data.firstPos;
-    }
-    if (data.recoilPos !== undefined) {
-      document.getElementById('rdt-pos').value = data.recoilPos;
-    }
-    // Auto-position magnet to cover array + camera
-    if (data.firstPos !== undefined) autoPositionMagnet(data);
-    document.getElementById('status').textContent = `☀ ${data.nDet*data.mDet} dets loaded | port 8765`;
+    GEO = _stateToGeo(state, preset);
+    buildScene();
+    applyReactionState(state);
+    checkCapabilities();
+    // Sync geometry panel
+    document.getElementById('bfield').value     = GEO.Bfield;
+    document.getElementById('bfield-val').value = parseFloat(GEO.Bfield).toFixed(2);
+    document.getElementById('array-pos').value  = GEO.firstPos;
+    document.getElementById('rdt-pos').value    = GEO.recoilPos;
+    // Auto-position magnet + camera
+    autoPositionMagnet(GEO);
+    document.getElementById('status').textContent = `☀ ${GEO.nDet*GEO.mDet} dets loaded | port 8765`;
     setLoadingProgress(100, 'Ready.');
     hideLoading();
   })
   .catch(e => {
-    document.getElementById('geo-info').textContent = '✕ Failed to load geometry';
+    document.getElementById('geo-info').textContent = '✕ Failed to load state';
     const lm = document.getElementById('loading-msg');
-    if (lm) { lm.textContent = '✕ Failed to load helios_geometry.json'; lm.style.color='#ff7b72'; }
+    if (lm) { lm.textContent = '✕ Failed to load /api/state: ' + e.message; lm.style.color='#ff7b72'; }
     console.error(e);
   });
 // ═══════════════════════════════════════════════════════════════════
