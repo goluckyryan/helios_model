@@ -120,11 +120,11 @@
       <div class="control"><label>θ_CM (deg)</label><input type="number" id="theta-cm" value="45" min="0" max="180" step="1"></div>
       <div class="control"><label>φ_CM (deg)</label><input type="number" id="phi-cm" value="30" min="0" max="360" step="1"></div>
       <div class="control"><label>Ex (MeV)</label><input type="number" id="ex-mev" value="0" min="0" max="10" step="0.1"></div>
-      <div class="control"><label>Anim speed</label><input type="range" id="anim-speed" min="1" max="10" value="1"></div>
+      <div class="control"><label>Anim speed</label><input type="range" id="anim-speed" min="1" max="10" value="3"></div>
       <div class="control" style="display:flex;align-items:center;gap:4px;"><label>Random θ,φ</label><input type="checkbox" id="random-angles" checked style="margin-left:4px;"><span style="color:#8b949e;font-size:10px;margin-left:6px;">min</span><input type="number" id="min-theta" value="10" min="0" max="179" step="1" style="width:40px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:1px 3px;font-size:11px;"><span style="color:#8b949e;font-size:10px;">°&nbsp;max</span><input type="number" id="max-theta" value="60" min="1" max="180" step="1" style="width:40px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:1px 3px;font-size:11px;"><span style="color:#8b949e;font-size:10px;">°</span></div>
       <div class="control"><label>Stop on support</label><input type="checkbox" id="stop-on-support" checked style="margin-left:8px;"></div>
-      <div class="control"><label>Rate /sec</label><input type="range" id="gen-rate" min="1" max="10" value="3" step="1"><span id="gen-rate-val" style="color:#ffa657;">3/s</span></div>
-      <div class="control"><label>Keep N</label><input type="range" id="keep-n" min="1" max="20" value="5" step="1"><span id="keep-n-val" style="color:#ffa657;">5</span></div>
+      <div class="control"><label>Rate /sec</label><input type="range" id="gen-rate" min="1" max="10" value="5" step="1"><span id="gen-rate-val" style="color:#ffa657;">3/s</span></div>
+      <div class="control"><label>Keep N</label><input type="range" id="keep-n" min="1" max="30" value="20" step="1"><span id="keep-n-val" style="color:#ffa657;">5</span></div>
       <button id="gen-btn">▶ Generate</button>
       <button id="auto-btn">▶▶ Auto</button>
       <button id="clear-btn">✕ Clear</button>
@@ -240,28 +240,12 @@ function hideLoading() {
 // ═══════════════════════════════════════════════════════════════════
 const C = 299.792458; // mm/ns
 
-// ── FALLBACK SETTINGS ────────────────────────────────────────────────────────
-// Used only if /api/state fails to load on startup.
-// Normally overwritten by the startup fetch('/api/state'), 'Load digios', and '⚙ Compute'.
-// Update these if you want a different standalone default (e.g. a new experiment).
-// Must mirror helios_config.json -> defaults; only used if /api/state fails on startup.
-const FALLBACK = {
-  // Geometry (helios_config.json defaults: 25F+d, HELIOS preset)
-  firstPos:   -100,    // mm, array near edge (upstream)
-  recoilPos:   500,    // mm, RDT position
-  Bfield:    -2.85,    // T, magnetic field
-  bore:       462.5,   // mm
-  // Reaction kinematics: 25F(d,p)26F at 10 MeV/u (approx, only used as fallback)
-  mass_b:    938.2720,   // MeV/c^2  light recoil (proton)
-  charge_b:  1,
-  betaCM:    0.04125,
-  Ecm:       25132.0,    // MeV, approximate total CM energy
-  mass_B:    24209.0,    // MeV/c^2  heavy recoil (approx 26F)
-  charge_B:  9,
-  alpha:     0.04125,
+// ── REACTION kinematics ────────────────────────────────────────────────────────
+// Mutable object populated by applyReactionState() from /api/state.
+// computeTrack() reads these fields; state load runs before any trajectory compute.
+const REACTION = {
+  mass_b: 0, charge_b: 0, betaCM: 0, Ecm: 0, mass_B: 0, charge_B: 0, alpha: 0,
 };
-// REACTION points to FALLBACK — same object, readable alias for physics code
-const REACTION = FALLBACK;
 
 
 function computeTrack(mass, charge, thetaCM_deg, phiCM_deg, Ex_MeV, Bfield_T, isLight) {
@@ -499,10 +483,10 @@ function updateColors() {
 function autoPositionMagnet(geo, moveCamera = true) {
   // Magnet center = midpoint of the full span: target(z=0), RDT, and array extents
   // magnet_center = ( min(0, RDT, arrayMin) + max(0, RDT, arrayMax) ) / 2
-  const target = 0;  // target always at z=0
-  const rdt    = geo.recoilPos || FALLBACK.recoilPos;
-  const arrayMin = geo.zMin || geo.firstPos || FALLBACK.firstPos;
-  const arrayMax = geo.zMax || geo.firstPos || FALLBACK.firstPos;
+  const target   = 0;  // target always at z=0
+  const rdt      = geo.recoilPos;
+  const arrayMin = geo.zMin ?? geo.firstPos;
+  const arrayMax = geo.zMax ?? geo.firstPos;
   const spanMin = Math.min(target, rdt, arrayMin);
   const spanMax = Math.max(target, rdt, arrayMax);
   let mz = Math.round((spanMin + spanMax) / 2);
@@ -1526,7 +1510,7 @@ async function _doApplyGeometry(newFirstPos, newRDTPos, status, btn) {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ config_source: 'manual',
                              geometry: { firstPos: newFirstPos, recoilPos: newRDTPos,
-                                         Bfield: GEO ? GEO.Bfield : FALLBACK.Bfield } })
+                                         Bfield: GEO.Bfield } })
     });
     const d = await r.json();
     if (!d.ok) { if(status){ status.textContent = 'Rebuild failed: ' + d.error; status.style.color = '#ff7b72'; } if(btn) btn.disabled=false; return; }
@@ -1589,21 +1573,21 @@ function _stateToGeo(state, preset) {
   return {
     config_source: state.config_source || 'manual',
     ss_type:       state.ss_type      || 'HELIOS',
-    Bfield:        g.Bfield      ?? p.Bfield      ?? FALLBACK.Bfield,
-    bore:          p.bore        ?? FALLBACK.bore,
-    perpDist:      p.perpDist    ?? 11.5,
-    detWidth:      p.detWidth    ?? 10.0,
-    detLen:        p.detLen      ?? 50.0,
-    detGap:        p.detGap      ?? 5.0,
-    recoilPos:     g.recoilPos   ?? p.recoilPos   ?? FALLBACK.recoilPos,
-    recoilInner:   g.recoilInner ?? p.recoilInner ?? 10.0,
-    recoilOuter:   g.recoilOuter ?? p.recoilOuter ?? 40.2,
-    firstPos:      g.firstPos    ?? p.firstPos    ?? FALLBACK.firstPos,
+    Bfield:        g.Bfield      ?? p.Bfield,
+    bore:          p.bore,
+    perpDist:      p.perpDist,
+    detWidth:      p.detWidth,
+    detLen:        p.detLen,
+    detGap:        p.detGap,
+    recoilPos:     g.recoilPos   ?? p.recoilPos,
+    recoilInner:   g.recoilInner ?? p.recoilInner,
+    recoilOuter:   g.recoilOuter ?? p.recoilOuter,
+    firstPos:      g.firstPos    ?? p.firstPos,
     facing:        p.facing      ?? 'Out',
     nDet:          (p.posOffsets || []).length,
-    mDet:          p.mDet        ?? 4,
-    zMin:          comp.zMin     ?? (g.firstPos ?? FALLBACK.firstPos),
-    zMax:          comp.zMax     ?? (g.firstPos ?? FALLBACK.firstPos),
+    mDet:          p.mDet,
+    zMin:          comp.zMin     ?? g.firstPos,
+    zMax:          comp.zMax     ?? g.firstPos,
     detectors:     comp.detectors || [],
   };
 }
