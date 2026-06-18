@@ -121,7 +121,7 @@
       <div class="control"><label>φ_CM (deg)</label><input type="number" id="phi-cm" value="30" min="0" max="360" step="1"></div>
       <div class="control"><label>Ex (MeV)</label><input type="number" id="ex-mev" value="0" min="0" max="10" step="0.1"></div>
       <div class="control"><label>Anim speed</label><input type="range" id="anim-speed" min="1" max="10" value="3"></div>
-      <div class="control" style="display:flex;align-items:center;gap:4px;"><label>Random θ,φ</label><input type="checkbox" id="random-angles" checked style="margin-left:4px;"><span style="color:#8b949e;font-size:10px;margin-left:6px;">min</span><input type="number" id="min-theta" value="10" min="0" max="179" step="1" style="width:40px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:1px 3px;font-size:11px;"><span style="color:#8b949e;font-size:10px;">°&nbsp;max</span><input type="number" id="max-theta" value="60" min="1" max="180" step="1" style="width:40px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:1px 3px;font-size:11px;"><span style="color:#8b949e;font-size:10px;">°</span></div>
+      <div class="control" style="display:flex;align-items:center;gap:4px;"><label>Random θ,φ</label><input type="checkbox" id="random-angles" checked style="margin-left:4px;"><span style="color:#8b949e;font-size:10px;margin-left:6px;">min</span><input type="number" id="min-theta" value="10" min="0" max="179" step="1" style="width:40px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:1px 3px;font-size:11px;"><span style="color:#8b949e;font-size:10px;">°&nbsp;max</span><input type="number" id="max-theta" value="40" min="1" max="180" step="1" style="width:40px;background:#161b22;border:1px solid #30363d;color:#ffa657;border-radius:4px;padding:1px 3px;font-size:11px;"><span style="color:#8b949e;font-size:10px;">°</span></div>
       <div class="control"><label>Stop on support</label><input type="checkbox" id="stop-on-support" checked style="margin-left:8px;"></div>
       <div class="control"><label>Rate /sec</label><input type="range" id="gen-rate" min="1" max="10" value="5" step="1"><span id="gen-rate-val" style="color:#ffa657;">3/s</span></div>
       <div class="control"><label>Keep N</label><input type="range" id="keep-n" min="1" max="30" value="20" step="1"><span id="keep-n-val" style="color:#ffa657;">5</span></div>
@@ -334,29 +334,11 @@ function computeTrack(mass, charge, thetaCM_deg, phiCM_deg, Ex_MeV, Bfield_T, is
   // vz is already signed (C * pz_lab / E_lab), keep as-is
   const vz_signed = vz; // signed: negative = going upstream
 
-  // Helix by time: t in ns
-  // x(t) = rho*(sin(omega*t + phi0) - sin(phi0)) * Bsign  ... derived from circular motion
-  // More precisely, matching HELIOS_LIB convention (starts at origin, phi0 = initial azimuth of p_T):
-  function helixPointT(t) {
-    const angle = omega * t;
-    const x = rho * (Math.sin(angle - Bsign * phi0) + Bsign * Math.sin(phi0));
-    const y = rho * (Bsign * Math.cos(angle - Bsign * phi0) - Bsign * Math.cos(phi0));
-    const z = vz_signed * t;
-    return { x, y, z };
-  }
-
-  // Also keep z-based for compatibility
-  function helixPoint(z) {
-    const arg = tanTheta * z / rho - Bsign * phi0;
-    const x = rho * (Math.sin(arg) + Bsign * Math.sin(phi0));
-    const y = rho * (Bsign * Math.cos(arg) - Bsign * Math.cos(phi0));
-    return { x, y, z };
-  }
-
+  // Trajectory points are produced by sampleHelixPoints()/sampleHelixPointsZ()
+  // (inline math from these track fields) — no per-track helix closures needed.
   return {
     mPart, charge, rho, phi0, tanTheta, Bsign, vz_sign: pz_lab >= 0 ? 1 : -1,
     pz_lab, pt_lab, vz: vz_signed, vt, E_lab, p_lab, omega,
-    helixPoint, helixPointT,
     thetaLab_deg: Math.atan2(pt_lab, pz_lab) * 180 / Math.PI,
     E_kin: E_lab - mPart,
   };
@@ -372,7 +354,7 @@ function sampleHelixPoints(track, zLimit, nSteps) {
   const tTotal = zLimit / vz; // positive when vz and zLimit have same sign
   if (!isFinite(tTotal) || tTotal <= 0) return [];
   const dt = tTotal / nSteps;
-  // Precompute per-step constants to avoid redundant multiply inside helixPointT
+  // Precompute per-step constants to avoid redundant multiply in the sample loop
   const omegaDt = omega * dt;
   const Bsign = track.Bsign, phi0 = track.phi0, rho = track.rho, vzSigned = track.vz;
   const pts = [];
@@ -495,15 +477,15 @@ function autoPositionMagnet(geo, moveCamera = true) {
   document.getElementById('target-z-val').textContent = (mz >= 0 ? '+' : '') + mz + ' mm';
   if (movableGroup) movableGroup.position.z = mz;
   buildBeamArrow();
-  // Reposition camera to array center (skipped when moveCamera=false, e.g. user clicked Reposition)
+  // Center the view (and the orbit pivot) on the middle of the magnet.
+  // (skipped when moveCamera=false, e.g. user clicked Reposition)
   if (moveCamera && typeof controls !== 'undefined' && typeof camera !== 'undefined') {
     const fp = geo.firstPos || 0;
     const zMin = geo.zMin !== undefined ? geo.zMin : fp;
     const zMax = geo.zMax !== undefined ? geo.zMax : fp;
-    const cz = (zMin + zMax) / 2;
     const vd = Math.max(300, Math.abs(zMax - zMin) * 1.5);
-    controls.target.set(0, 0, cz);
-    camera.position.set(vd * 0.4, vd * 0.3, cz + vd);
+    controls.target.set(0, 0, mz);            // center of rotation = middle of magnet
+    camera.position.set(vd * 0.4, vd * 0.3, mz + vd);
     controls.update();
   }
 }
@@ -621,8 +603,15 @@ function buildScene() {
   const g = GEO;
   detMeshes = [];
 
-  // Remove previous detector group if rebuilding
-  if (detGroup) { disposeGroup(detGroup); scene.remove(detGroup); }
+  // Remove + dispose ALL groups this function rebuilds, so a repeated buildScene
+  // (e.g. "Load digios") does not orphan the previous scene's geometry/materials/
+  // textures on the GPU. movableGroup owns boreGroup + zAxisGroup as children, so
+  // disposing it covers those too. targetGroup/beamArrowGroup self-dispose in their
+  // own builders (called below), so they are not handled here.
+  [detGroup, movableGroup, recoilGroup, tubeGroup, axisGroup].forEach(grp => {
+    if (grp) { disposeGroup(grp); scene.remove(grp); }
+  });
+
   detGroup = new THREE.Group();
   scene.add(detGroup);
 
@@ -900,18 +889,8 @@ function pruneOldTracks() {
   });
 }
 
-// Check if a helix point hits the N-sided support tube
-// Uses radial distance from beam axis: tube panels sit at r=perpDist, thickness=tubeWall
-function checkTubeHit(pt, geo) {
-  if (!geo._tubeWidth) return false;
-  if (pt.z < geo._tubeZMin || pt.z > geo._tubeZMax) return false;
-  const r = Math.sqrt(pt.x * pt.x + pt.y * pt.y);
-  const w = 1.5;  // wall thickness mm
-  // Hit if radial distance is within one wall thickness of perpDist
-  return Math.abs(r - geo.perpDist) < w;
-}
-
-// Check if a helix point hits a silicon detector
+// Does the point (already on/near the r=perpDist shell) fall inside a silicon detector?
+// Returns the detector or null. Used by the segment tester on an interpolated contact point.
 function checkSiHit(pt, geo) {
   const r = Math.sqrt(pt.x*pt.x + pt.y*pt.y);
   if (Math.abs(r - geo.perpDist) > geo.detWidth * 0.6) return null;
@@ -933,23 +912,95 @@ function checkSiHit(pt, geo) {
   return null;
 }
 
-// Check if a point hits the recoil detector
-function checkRecoilHit(pt, geo) {
-  if (Math.abs(pt.z - geo.recoilPos) > 8) return false; // ~2x step size at 200 steps/orbit
-  const r = Math.sqrt(pt.x*pt.x + pt.y*pt.y);
-  return r >= geo.recoilInner && r <= geo.recoilOuter;
+// ═══════════════════════════════════════════════════════════════════
+// COLLISION DETECTION  (decoupled from the render/animation sampling)
+// ═══════════════════════════════════════════════════════════════════
+// detectHit() walks the helix on its OWN fine time grid and tests each SEGMENT with
+// crossing math, so a hit is never tunneled through between two (coarser) render
+// samples. Returns the first contact { tHit, point, hitDet, hitRecoil, hitTube,
+// hitBore } or null (clean miss). The animation later trims its rendered path at tHit.
+
+function _lerpPt(a, b, f) {
+  return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, z: a.z + (b.z - a.z) * f };
+}
+// Fraction along p0→p1 where radius from the beam axis equals R (null if no crossing).
+function _crossRadius(p0, p1, R) {
+  const r0 = Math.sqrt(p0.x*p0.x + p0.y*p0.y);
+  const r1 = Math.sqrt(p1.x*p1.x + p1.y*p1.y);
+  if ((r0 - R) * (r1 - R) > 0) return null;        // both on the same side — no crossing
+  const d = r1 - r0;
+  return Math.abs(d) < 1e-12 ? 0 : (R - r0) / d;
+}
+// Fraction along p0→p1 where z equals zPlane (null if no crossing).
+function _crossZplane(p0, p1, zPlane) {
+  if ((p0.z - zPlane) * (p1.z - zPlane) > 0) return null;
+  const d = p1.z - p0.z;
+  return Math.abs(d) < 1e-12 ? 0 : (zPlane - p0.z) / d;
 }
 
-function checkRecoilCrossing(ptPrev, ptCurr, geo) {
-  // Check if trajectory crossed the RDT z-plane between two consecutive points
-  const rPos = geo.recoilPos;
-  if (!((ptPrev.z <= rPos && ptCurr.z >= rPos) || (ptPrev.z >= rPos && ptCurr.z <= rPos))) return false;
-  // Interpolate x,y at z=recoilPos
-  const frac = (rPos - ptPrev.z) / (ptCurr.z - ptPrev.z);
-  const xi = ptPrev.x + frac * (ptCurr.x - ptPrev.x);
-  const yi = ptPrev.y + frac * (ptCurr.y - ptPrev.y);
-  const r = Math.sqrt(xi*xi + yi*yi);
-  return r >= geo.recoilInner && r <= geo.recoilOuter;
+// Test one segment against every collidable; return {frac, point, det?/recoil?/tube?/bore?} or null.
+function _segHit(p0, p1, isLight, geo, stopOnSupport) {
+  // Silicon array + support tube both live on the shell r = perpDist.
+  if (isLight || stopOnSupport) {
+    const fr = _crossRadius(p0, p1, geo.perpDist);
+    if (fr !== null) {
+      const pt = _lerpPt(p0, p1, fr);
+      if (isLight) {
+        const det = checkSiHit(pt, geo);
+        if (det) return { frac: fr, point: pt, det };
+      }
+      if (stopOnSupport && geo._tubeWidth && pt.z >= geo._tubeZMin && pt.z <= geo._tubeZMax) {
+        return { frac: fr, point: pt, tube: true };
+      }
+    }
+  }
+  // Recoil detector: planar ring at z = recoilPos.
+  const fz = _crossZplane(p0, p1, geo.recoilPos);
+  if (fz !== null) {
+    const pt = _lerpPt(p0, p1, fz);
+    const r = Math.sqrt(pt.x*pt.x + pt.y*pt.y);
+    if (r >= geo.recoilInner && r <= geo.recoilOuter) return { frac: fz, point: pt, recoil: true };
+  }
+  // Bore wall: outermost shell r = bore.
+  const fb = _crossRadius(p0, p1, geo.bore);
+  if (fb !== null) return { frac: fb, point: _lerpPt(p0, p1, fb), bore: true };
+  return null;
+}
+
+function detectHit(track, zLimit, isLight, geo) {
+  const vz = track.vz, omega = track.omega;
+  if (Math.abs(vz) < 0.001 || !isFinite(omega) || omega === 0) return null;
+  const tTotal = zLimit / vz;
+  if (!isFinite(tTotal) || tTotal <= 0) return null;
+  const Bsign = track.Bsign, phi0 = track.phi0, rho = track.rho;
+  const sinP0 = Math.sin(phi0), cosP0 = Math.cos(phi0);
+  const pointAt = t => {
+    const a = omega * t;
+    return { x: rho * (Math.sin(a - Bsign*phi0) + Bsign*sinP0),
+             y: rho * (Bsign*Math.cos(a - Bsign*phi0) - Bsign*cosP0),
+             z: vz * t };
+  };
+  // Fine step: ~0.3 mm of flight OR ~0.3° of cyclotron rotation, whichever is smaller.
+  const v = Math.sqrt(track.vt*track.vt + vz*vz);
+  const dtSpatial = 0.3 / Math.max(v, 1e-6);
+  const dtAngular = (0.3 * Math.PI/180) / Math.max(Math.abs(omega), 1e-9);
+  let n = Math.ceil(tTotal / Math.min(dtSpatial, dtAngular));
+  if (!isFinite(n) || n < 1) n = 1;
+  if (n > 300000) n = 300000;        // safety cap (still sub-mm for any realistic track)
+  const dt = tTotal / n;
+  const stopOnSupport = document.getElementById('stop-on-support').checked;
+  let prev = pointAt(0);
+  for (let i = 1; i <= n; i++) {
+    const cur = pointAt(i * dt);
+    const hit = _segHit(prev, cur, isLight, geo, stopOnSupport);
+    if (hit) {
+      return { tHit: (i - 1 + hit.frac) * dt, point: hit.point,
+               hitDet: hit.det || null, hitRecoil: !!hit.recoil,
+               hitTube: !!hit.tube, hitBore: !!hit.bore };
+    }
+    prev = cur;
+  }
+  return null; // clean miss
 }
 
 function generateEvent(autoMode = false) {
@@ -1038,39 +1089,38 @@ function generateEvent(autoMode = false) {
     return;
   }
 
-  // Trim at hit points
-  function trimAtHit(pts, isLight) {
-    for (let i = 1; i < pts.length; i++) {
-      const pt = pts[i];
-      // Both particles stop at bore wall
-      const r = Math.sqrt(pt.x*pt.x + pt.y*pt.y);
-      if (r >= GEO.bore) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: false, hitTube: false, hitBore: true };
-      const stopOnSupport = document.getElementById('stop-on-support').checked;
-      if (isLight) {
-        // Stop on silicon detector hit
-        const hit = checkSiHit(pt, GEO);
-        if (hit) return { pts: pts.slice(0, i+1), hitDet: hit, hitRecoil: false, hitTube: false, hitBore: false };
-        // Stop on support tube hit (optional)
-        if (stopOnSupport && checkTubeHit(pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: false, hitTube: true, hitBore: false };
-        // Downstream array: light recoil can also hit RDT (use crossing check)
-        const prevPtL = i > 0 ? pts[i-1] : null;
-        if (GEO.firstPos > 0 && prevPtL && checkRecoilCrossing(prevPtL, pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: true, hitTube: false, hitBore: false };
-        if (GEO.firstPos > 0 && checkRecoilHit(pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: true, hitTube: false, hitBore: false };
-      } else {
-        const prevPtH = i > 0 ? pts[i-1] : null;
-        if (prevPtH && checkRecoilCrossing(prevPtH, pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: true, hitTube: false, hitBore: false };
-        if (checkRecoilHit(pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: true, hitTube: false, hitBore: false };
-        if (stopOnSupport && checkTubeHit(pt, GEO)) return { pts: pts.slice(0, i+1), hitDet: null, hitRecoil: false, hitTube: true, hitBore: false };
-      }
-    }
-    return { pts, hitDet: null, hitRecoil: false, hitTube: false, hitBore: false };
+  // Real flight time (ns) represented by one render-sample index — matches how each
+  // track was sampled (light: uniform in time; heavy: uniform in z but vz const ⇒ uniform
+  // in time). Used both to drive the shared animation clock and to map the hit time → index.
+  const dtLight = Math.abs(lightZLimit / trackB_light.vz) / nLight;
+  const dtHeavy = Math.abs(heavyZMax  / trackB_heavy.vz) / 600;
+
+  // Dedicated fine collision pass (independent of the render sampling above).
+  const lightHit = detectHit(trackB_light, lightZLimit, true,  GEO);
+  const heavyHit = detectHit(trackB_heavy, heavyZMax,   false, GEO);
+
+  // Trim the rendered path at the hit: keep render samples up to the hit time, then
+  // end exactly on the interpolated contact point so the line/dot stop on the surface.
+  function trimRender(pts, dtPerStep, hit) {
+    if (!hit) return pts;
+    const keep = Math.max(1, Math.floor(hit.tHit / dtPerStep));
+    const out  = pts.slice(0, Math.min(keep + 1, pts.length));
+    out.push(hit.point);
+    return out;
   }
+  const lightPts = trimRender(ptsLight, dtLight, lightHit);
+  const heavyPts = trimRender(ptsHeavy, dtHeavy, heavyHit);
 
-  const lightResult = trimAtHit(ptsLight, true);
-  const heavyResult = trimAtHit(ptsHeavy, false);
+  const hitFlags = h => ({ hitDet: h ? h.hitDet : null, hitRecoil: !!(h && h.hitRecoil),
+                           hitTube: !!(h && h.hitTube), hitBore: !!(h && h.hitBore) });
+  const lightResult = hitFlags(lightHit);
+  const heavyResult = hitFlags(heavyHit);
 
-  // Create animated track objects
-  function makeAnimTrack(pts, color, result, label) {
+  // Create animated track objects.
+  // dtPerStep = real flight time (ns) represented by one index of THIS track's pts[]
+  // array. It differs between light and heavy (they are sampled with different step
+  // counts / methods); stepAnimations() uses it to drive both off one shared clock.
+  function makeAnimTrack(pts, color, result, label, dtPerStep) {
     // Full path geometry (will reveal points progressively)
     const positions = new Float32Array(pts.length * 3);
     pts.forEach((p, i) => { positions[i*3]=p.x; positions[i*3+1]=p.y; positions[i*3+2]=p.z; });
@@ -1100,15 +1150,16 @@ function generateEvent(autoMode = false) {
 
     return {
       pts, line, geo, posAttr, dotMesh, flashMesh,
-      idx: 0, done: false, label,
+      idx: 0, time: 0,                                    // time = ns elapsed on shared clock
+      dtPerStep: (isFinite(dtPerStep) && dtPerStep > 0) ? dtPerStep : 1,
+      done: false, label,
       hitDet: result.hitDet, hitRecoil: result.hitRecoil, hitTube: result.hitTube, hitBore: result.hitBore,
       flashTimer: 0,
     };
   }
 
-  const animSpeed = parseInt(document.getElementById('anim-speed').value);
-  const lightAnim = makeAnimTrack(lightResult.pts, 0x44aaff, lightResult, 'Light (b)');
-  const heavyAnim = makeAnimTrack(heavyResult.pts, 0xff8844, heavyResult, 'Heavy (B)');
+  const lightAnim = makeAnimTrack(lightPts, 0x44aaff, lightResult, 'Light (b)', dtLight);
+  const heavyAnim = makeAnimTrack(heavyPts, 0xff8844, heavyResult, 'Heavy (B)', dtHeavy);
   animations.push(lightAnim, heavyAnim);
   eventHistory.push({ lightAnim, heavyAnim });
   pruneOldTracks();
@@ -1129,9 +1180,14 @@ function generateEvent(autoMode = false) {
 
 // Step the animation each frame
 const _animSpeedEl = (typeof document !== 'undefined') ? document.getElementById('anim-speed') : null;
+// Real flight time (ns) advanced per speed-unit, per frame. The slider (1–10) scales
+// this. ALL tracks advance by the same dtFrame, so light vs heavy move at physically
+// correct relative speeds (the faster particle covers more mm per frame).
+const _ANIM_NS_PER_FRAME = 0.08;
 function stepAnimations() {
   // Cached DOM ref — avoids 60Hz getElementById lookups
   const speed = parseInt((_animSpeedEl || document.getElementById('anim-speed')).value, 10);
+  const dtFrame = speed * _ANIM_NS_PER_FRAME; // shared real-time step for every track
   animations.forEach(anim => {
     if (anim.done) {
       // Flash decay
@@ -1141,7 +1197,9 @@ function stepAnimations() {
       }
       return;
     }
-    const newIdx = Math.min(anim.idx + speed, anim.pts.length - 1);
+    // Advance shared clock, then map elapsed time → this track's own sample index.
+    anim.time += dtFrame;
+    const newIdx = Math.min(Math.round(anim.time / anim.dtPerStep), anim.pts.length - 1);
     anim.geo.setDrawRange(0, newIdx + 1);
     anim.posAttr.needsUpdate = true;
     const pt = anim.pts[newIdx];
@@ -1221,8 +1279,9 @@ document.getElementById('bore-opacity').addEventListener('input', function() {
 });
 document.getElementById('color-mode').addEventListener('change', updateColors);
 document.getElementById('reset-view-btn').addEventListener('click', () => {
-  camera.position.set(80, 60, 300);
-  controls.target.set(0, 0, 0);
+  const mz = movableGroup ? movableGroup.position.z : 0; // middle of magnet
+  controls.target.set(0, 0, mz);
+  camera.position.set(80, 60, mz + 300);
   controls.update();
 });
 
@@ -1343,20 +1402,13 @@ function resolveSymbol(role) {
   const inp = document.getElementById(prefix+'-sym');
   const info = document.getElementById(prefix+'-info');
   if (!inp) return;
-  const raw = inp.value.trim();
-  const resolved = HELIOS_SHORTHAND[raw] || HELIOS_SHORTHAND[raw.toLowerCase()] || raw;
-  inp.value = resolved;
-  const m = resolved.match(/^(\d+)([A-Za-z]+)$/);
-  if (!m) { if(info){ info.textContent='?'; info.style.color='#ff7b72'; } return; }
-  const A = parseInt(m[1]);
-  const sym = m[2];
-  // Case-sensitive: Title-case canonicalization so 'N'=nitrogen(7) != 'n'=neutron(0)
-  const symCanon = sym.length === 1 ? sym : sym[0].toUpperCase() + sym.slice(1).toLowerCase();
-  const Z = ELEMENT_SYMBOLS.findIndex(s => s === symCanon);
-  if (Z < 0) { if(info){ info.textContent='unknown'; info.style.color='#ff7b72'; } return; }
-  document.getElementById(prefix+'-A').value = A;
-  document.getElementById(prefix+'-Z').value = Z;
-  if (info) { info.textContent = `Z=${Z}`; info.style.color='#3fb950'; }
+  // Single shared parser (shorthand + case-sensitive symbol→Z) lives in helios_common.js
+  const parsed = heliosParseNuclide(inp.value.trim());
+  if (!parsed) { if(info){ info.textContent='?'; info.style.color='#ff7b72'; } return; }
+  inp.value = parsed.resolved;
+  document.getElementById(prefix+'-A').value = parsed.A;
+  document.getElementById(prefix+'-Z').value = parsed.Z;
+  if (info) { info.textContent = `Z=${parsed.Z}`; info.style.color='#3fb950'; }
   if (role==='beam')   buildBeamArrow();
   if (role==='target') buildTarget();
 }
@@ -1519,34 +1571,16 @@ async function _doApplyGeometry(newFirstPos, newRDTPos, status, btn) {
     if(status){ status.textContent = 'Rebuild error: ' + e.message; status.style.color = '#ff7b72'; } if(btn) btn.disabled=false; return;
   }
 
-  // Adopt server-recomputed state (authoritative); shift scene objects in-place for smooth UX
+  // Adopt the server-recomputed state as the single source of truth and rebuild
+  // from it. buildScene() disposes the previous geometry (no GPU leak) and recreates
+  // detectors/tube/recoil at their new z — so there is no in-place mesh shuffle to
+  // keep in sync and no client-side drift. (serverState is guaranteed here: any
+  // fetch failure returned above.)
   try {
-    const delta = newFirstPos - GEO.firstPos;
-    detMeshes.forEach(mesh => { mesh.position.z += delta; });
-    if (tubeGroup) tubeGroup.position.z += delta;
-    if (recoilGroup) {
-      recoilGroup.children.forEach(child => {
-        if (child.geometry && child.geometry.type === 'RingGeometry') {
-          child.position.z = newRDTPos;
-        }
-      });
-    }
-
-    // Refresh GEO from server state (single source of truth)
-    if (serverState) {
-      const preset = (HELIOS_SS_PRESETS || {})[serverState.ss_type] || {};
-      GEO = _stateToGeo(serverState, preset);
-      GEO._tubeZMin = GEO.zMin; GEO._tubeZMax = GEO.zMax;
-    } else {
-      // Should not happen (return above on failure), but keep client consistent
-      GEO.detectors.forEach(d => { d.z_near += delta; d.z_center += delta; d.z += delta; });
-      GEO.firstPos = newFirstPos;
-      GEO.zMin += delta; GEO.zMax += delta;
-      GEO._tubeZMin = GEO.zMin; GEO._tubeZMax = GEO.zMax;
-      GEO.recoilPos = newRDTPos;
-    }
-
-    autoPositionMagnet(GEO, false);  // magnet only, do not move camera
+    const preset = (HELIOS_SS_PRESETS || {})[serverState.ss_type] || {};
+    GEO = _stateToGeo(serverState, preset);
+    buildScene();                    // sets GEO._tubeZMin/_tubeZMax internally
+    autoPositionMagnet(GEO, false);  // recenter magnet only, do not move camera
     clearTracks();
     status.textContent = `Repositioned: firstPos=${newFirstPos}mm  RDT=${newRDTPos}mm`;
     status.style.color = '#3fb950';
@@ -1662,6 +1696,7 @@ function startRecording() {
 
   _recorder.onstop = () => {
     clearInterval(_recInterval);
+    stream.getTracks().forEach(t => t.stop()); // release the canvas capture track
     const blob = new Blob(_recChunks, { type: mime });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');

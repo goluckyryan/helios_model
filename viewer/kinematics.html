@@ -1024,14 +1024,13 @@ function fastRelayout() {
   const firstPos = parseFloat(document.getElementById('sp-array').value);
   const rdtPos   = parseFloat(document.getElementById('sp-rdt').value);
   const { shapesEZ, shapesRZ } = buildShapes(firstPos, rdtPos);
-  const xRange = calcXRange(firstPos);
   try {
-    const _rMax = parseFloat(document.getElementById('inp-rmax')?.value||50);
-  const _ezXR = calcXRange(firstPos);
-  const _zMin = parseFloat(document.getElementById('inp-zmin')?.value||-600);
-  const _zMax = parseFloat(document.getElementById('inp-zmax')?.value||200);
-  Plotly.relayout('plot-ez', { 'xaxis.range': _ezXR, shapes: shapesEZ });
-    Plotly.relayout('plot-rz', { 'xaxis.range': [_zMin, _zMax], 'yaxis.range': [0, _rMax], shapes: shapesRZ });
+    const ezXR = calcXRange(firstPos);
+    const rMax = parseFloat(document.getElementById('inp-rmax')?.value || 50);
+    const zMin = parseFloat(document.getElementById('inp-zmin')?.value || -600);
+    const zMax = parseFloat(document.getElementById('inp-zmax')?.value || 200);
+    Plotly.relayout('plot-ez', { 'xaxis.range': ezXR, shapes: shapesEZ });
+    Plotly.relayout('plot-rz', { 'xaxis.range': [zMin, zMax], 'yaxis.range': [0, rMax], shapes: shapesRZ });
   } catch(e) {}
 }
 
@@ -1683,19 +1682,10 @@ function calThetaCM() {
 let _ndsLevelPopup = null;  // reusable popup window for ENSDF level plots
 
 function ndsResolveIso(raw) {
-  // Use HELIOS_SHORTHAND from helios_config.json (single source of truth)
-  const s = raw.trim();
-  const resolved = HELIOS_SHORTHAND[s] || s;
-  const m = resolved.match(/^(\d+)([A-Za-z]+)$/);
-  if (!m) return null;
-  const A = parseInt(m[1]);
-  const sym = m[2];
-  // Case-sensitive lookup: canonicalize sym to Title-case (e.g. 'n'→'n', 'N'→'N', 'he'→'He')
-  // Index 0 is 'n' (neutron); index 7 is 'N' (nitrogen) — must NOT conflate them.
-  const symCanon = sym.length === 1 ? sym : sym[0].toUpperCase() + sym.slice(1).toLowerCase();
-  const Z = ELEMENT_SYMBOLS.findIndex(el => el === symCanon);
-  if (Z < 0) return null;
-  return { A, Z, name: A + ELEMENT_SYMBOLS[Z] };
+  // Shared parser in helios_common.js (shorthand + case-sensitive symbol→Z;
+  // 'n'=neutron Z=0 must NOT be conflated with 'N'=nitrogen Z=7).
+  const p = heliosParseNuclide(raw);
+  return p ? { A: p.A, Z: p.Z, name: p.name } : null;
 }
 
 async function ndsGet(tool, args) {

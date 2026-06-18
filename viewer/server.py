@@ -176,12 +176,13 @@ def _make_detectors(preset, first_pos):
                 'detLen': length, 'detWidth': width,
             })
 
+    by_rc = {(d['row'], d['col']): d for d in dets}
     new_id = 0
     for s in side_order:
         for c in range(n_det):
-            for d in dets:
-                if d['row'] == s and d['col'] == c:
-                    d['id'] = new_id; new_id += 1; break
+            d = by_rc.get((s, c))
+            if d is not None:
+                d['id'] = new_id; new_id += 1
 
     znears = [d['z_near'] for d in dets]
     z_min = round(min(znears) - (length if fp < 0 else 0), 4)
@@ -360,6 +361,48 @@ def mcp_tool_call(nds_url, tool_name, arguments, timeout=15):
         except Exception: pass
         t.join(timeout=1.0)
 
+# ── Ptolemy DWBA helpers ──────────────────────────────────────────────────────
+
+# Optical-model potential reference labels, keyed by gen_infile potential code.
+_POT_REFS = {
+    'A':'An and Cai (2006)','H':'Han, Shi, Shen (2006)',
+    'D':'Daehnick (1980) REL','C':'Daehnick (1980) NON-REL',
+    'K':'Koning and Delaroche (2009)','V':'Varner CH89 (1991)',
+    'M':'Menet (1971)','G':'Becchetti and Greenlees (1969)',
+    'x':'Xu, Guo, Han, Shen (2011)','X':'Xu, Guo, Han, Shen (2011)',
+    'l':'Liang, Li, Cai (2009)','s':'Su and Han (2015)',
+    'S':'Su and Han (2015)','n':'zero (neutron)',
+}
+
+def _auto_pot(A, Z):
+    """Default optical-model potential code for an ejectile/target (A, Z)."""
+    if A == 1 and Z == 1: return 'K'   # proton
+    if A == 2 and Z == 1: return 'A'   # deuteron
+    if A == 3 and Z == 1: return 'c'   # triton
+    if A == 3 and Z == 2: return 'x'   # 3He
+    if A == 4 and Z == 2: return 's'   # alpha
+    return 'n'
+
+def _parse_ptolemy_xsec(stdout):
+    """Extract (angles, xsec) from Ptolemy stdout, dropping NaN points.
+    Returns ([], []) if no cross-section block is present."""
+    import re
+    angles, xsec, in_xsec = [], [], False
+    for line in stdout.splitlines():
+        if 'COMPUTATION OF CROSS SECTIONS' in line:
+            in_xsec = True; continue
+        if not in_xsec: continue
+        m = re.match(r'^\s+(\d+\.\d+)\s+(NaN|[\d\.Ee+\-]+)\s+', line)
+        if m:
+            angles.append(float(m.group(1)))
+            xsec.append(float('nan') if m.group(2) == 'NaN' else float(m.group(2)))
+        if line.strip().startswith('0TOTAL:'): break
+    valid = [(a, x) for a, x in zip(angles, xsec) if not math.isnan(x)]
+    if valid:
+        a_list, x_list = map(list, zip(*valid))
+        return a_list, x_list
+    return [], []
+
 # ── HTTP Handler ──────────────────────────────────────────────────────────────
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -525,7 +568,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         # ── Ptolemy DWBA ──────────────────────────────────────────────────────
         elif path == '/api/ptolemy':
-            import tempfile, shutil, re, glob, math as _math, importlib.util as _ilu
+            import tempfile, shutil, glob, importlib.util as _ilu
             try:
                 data     = json.loads(body)
                 state    = read_state()
@@ -551,18 +594,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 hvy_Z  = beam_Z + tgt_Z - lt_Z
                 sym    = element_symbol
 
-                _POT_REFS = {
-                    'A':'An and Cai (2006)','H':'Han, Shi, Shen (2006)',
-                    'D':'Daehnick (1980) REL','C':'Daehnick (1980) NON-REL',
-                    'K':'Koning and Delaroche (2009)','V':'Varner CH89 (1991)',
-                    'M':'Menet (1971)','G':'Becchetti and Greenlees (1969)',
-                    'x':'Xu, Guo, Han, Shen (2011)','X':'Xu, Guo, Han, Shen (2011)',
-                    'l':'Liang, Li, Cai (2009)','s':'Su and Han (2015)',
-                    'S':'Su and Han (2015)','n':'zero (neutron)',
-                }
                 reaction_label = f'{beam_A}{sym(beam_Z)}({tgt_A}{sym(tgt_Z)},{lt_A}{sym(lt_Z)}){hvy_A}{sym(hvy_Z)}'
                 qvalue = rx.get('Q', state['computed'].get('Q'))
                 if qvalue is not None: qvalue = float(qvalue)
+                beam_energy = float(rx.get('beam_energy_MeVu', state['reaction']['beam_energy_MeVu']))
 
                 _gf_spec = _ilu.spec_from_file_location('gen_infile', GEN_INFILE_PY)
                 _gf = _ilu.module_from_spec(_gf_spec); _gf_spec.loader.exec_module(_gf)
@@ -576,24 +611,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         recoil_jpi = st.get('recoil_jpi', '0+')
                         j_val = float(j_str.split('/')[0])/float(j_str.split('/')[1]) if '/' in j_str else float(j_str)
 
-                        def auto_pot(A, Z):
-                            if A==1 and Z==1: return 'K'
-                            if A==2 and Z==1: return 'A'
-                            if A==3 and Z==1: return 'c'
-                            if A==3 and Z==2: return 'x'
-                            if A==4 and Z==2: return 's'
-                            return 'n'
-
                         pot_in  = st.get('pot_in',  'auto'); pot_out = st.get('pot_out', 'auto')
-                        if pot_in  == 'auto': pot_in  = auto_pot(tgt_A, tgt_Z)
-                        if pot_out == 'auto': pot_out = auto_pot(lt_A,  lt_Z)
+                        if pot_in  == 'auto': pot_in  = _auto_pot(tgt_A, tgt_Z)
+                        if pot_out == 'auto': pot_out = _auto_pot(lt_A,  lt_Z)
 
                         try:
                             in_content = _gf.gen_infile(
                                 beam_A=beam_A, beam_Z=beam_Z,
                                 target_A=tgt_A, target_Z=tgt_Z,
                                 light_A=lt_A, light_Z=lt_Z,
-                                beam_energy_MeVu=float(rx.get('beam_energy_MeVu', state['reaction']['beam_energy_MeVu'])),
+                                beam_energy_MeVu=beam_energy,
                                 ex=ex, nodes=n, l=l, j=j_val,
                                 recoil_jpi=recoil_jpi, jbiga=jbiga,
                                 pot_in_code=pot_in, pot_out_code=pot_out,
@@ -613,20 +640,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             pty_r = subprocess.run([PTOLEMY_BIN], stdin=_si,
                                 capture_output=True, text=True, timeout=60, cwd=tmpdir)
 
-                        angles = []; xsec = []; in_xsec = False
-                        for line in pty_r.stdout.splitlines():
-                            if 'COMPUTATION OF CROSS SECTIONS' in line: in_xsec = True; continue
-                            if not in_xsec: continue
-                            m2 = re.match(r'^\s+(\d+\.\d+)\s+(NaN|[\d\.Ee+\-]+)\s+', line)
-                            if m2:
-                                angles.append(float(m2.group(1)))
-                                xsec.append(float('nan') if m2.group(2)=='NaN' else float(m2.group(2)))
-                            if line.strip().startswith('0TOTAL:'): break
-
-                        valid = [(a,x) for a,x in zip(angles,xsec) if not _math.isnan(x)]
-                        if valid: angles, xsec = map(list, zip(*valid))
-                        else:     angles, xsec = [], []
-
+                        angles, xsec = _parse_ptolemy_xsec(pty_r.stdout)
                         if not angles:
                             errors.append({'msg': f'Ex={ex} (l={l} j={j_str}): no cross section', 'in_file': in_content}); continue
 

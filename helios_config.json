@@ -159,7 +159,7 @@
     "HELIOS": {
       "perpDist": 11.5,
       "detLen": 50.0,
-      "detWidth": 5.0,
+      "detWidth": 10.0,
       "detGap": 5.0,
       "nDet": 6,
       "mDet": 4,
@@ -182,7 +182,7 @@
     "SOLARIS": {
       "perpDist": 11.5,
       "detLen": 50.0,
-      "detWidth": 5.0,
+      "detWidth": 10.0,
       "detGap": 5.0,
       "nDet": 10,
       "mDet": 4,
