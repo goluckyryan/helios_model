@@ -16,6 +16,54 @@ Works standalone — no digios required. All necessary files are bundled.
 
 ---
 
+## Running as a Service (systemd)
+
+The server can run in the background as a **systemd user service** so it starts automatically on login and restarts on failure.
+
+Unit file: `~/.config/systemd/user/helios-model.service`
+
+```ini
+[Unit]
+Description=HELIOS 3D Model Viewer Server
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/heliosspark/helios_model/viewer
+ExecStart=/usr/bin/python3 /home/heliosspark/helios_model/viewer/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+### Manage the service
+
+```bash
+# after editing the unit file
+systemctl --user daemon-reload
+
+# enable + start (auto-starts on login, port 8765)
+systemctl --user enable --now helios-model.service
+
+# status / logs
+systemctl --user status helios-model.service
+journalctl --user -u helios-model.service -f
+
+# stop (Restart=always brings it back — use disable to keep it down)
+systemctl --user stop helios-model.service
+
+# stop and prevent auto-start
+systemctl --user disable --now helios-model.service
+```
+
+> **Note:** With `Restart=always`, `kill`-ing the process or `stop`-ing the service alone won't keep it down — systemd restarts it after `RestartSec`. Use `disable --now` to fully stop it.
+>
+> To keep the service running after logout, enable linger: `loginctl enable-linger $USER`.
+
+---
+
 ## Files
 
 | File | Description |
